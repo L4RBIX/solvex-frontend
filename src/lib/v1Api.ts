@@ -373,6 +373,177 @@ export function getLeaderboardWeekly(
   return v1Fetch(`/api/v1/leaderboards/${encodeURIComponent(leaderboardId)}/weekly${query}`);
 }
 
+// ─── Friend duels (Phase G4) ─────────────────────────────────────────────────
+//
+// Invite-only 1v1 — no matchmaking, no Elo, no tournaments.
+
+export type DuelMode = "rapid_10" | "classic_30";
+export type DuelStatus = "waiting" | "active" | "completed" | "expired" | "cancelled";
+
+export interface DuelProblem {
+  problem_id: string;
+  name: string;
+  rating: number | null;
+  tags: string[];
+  contest_id?: number | null;
+  index?: string | null;
+  url?: string | null;
+}
+
+export interface DuelParticipant {
+  display_name: string;
+  handle: string | null;
+  role: string;
+  final_status: string;
+  accepted_at: string | null;
+  joined_at: string;
+  submission_count: number;
+  is_viewer: boolean;
+  is_winner: boolean;
+}
+
+export interface DuelDetail {
+  duel_id: string;
+  mode: DuelMode;
+  status: DuelStatus;
+  problem: DuelProblem;
+  skill_id?: string | null;
+  starts_at: string | null;
+  expires_at: string;
+  created_at: string;
+  completed_at: string | null;
+  winner_subject: string | null;
+  result_reason: string | null;
+  viewer_subject?: string | null;
+  viewer_role?: string | null;
+  participants: DuelParticipant[];
+}
+
+export interface CreateDuelResponse {
+  duel_id: string;
+  mode: DuelMode;
+  status: DuelStatus;
+  problem: DuelProblem;
+  invite_code: string;
+  expires_at: string;
+  created_at: string;
+}
+
+export interface DuelInvitePreview {
+  duel_id: string;
+  mode: DuelMode;
+  status: DuelStatus;
+  creator_display_name: string;
+  problem: DuelProblem;
+  expires_at: string;
+  participants_count: number;
+}
+
+export interface DuelSummary {
+  duel_id: string;
+  mode: DuelMode;
+  status: DuelStatus;
+  problem_id: string;
+  problem_rating: number | null;
+  role: string;
+  created_at: string;
+  expires_at: string;
+  winner_subject: string | null;
+  result_reason: string | null;
+}
+
+export function listDuels(handle?: string): Promise<{ duels: DuelSummary[] }> {
+  const query = handle ? `?handle=${encodeURIComponent(handle)}` : "";
+  return v1Fetch(`/api/v1/duels${query}`);
+}
+
+export function createDuel(
+  mode: DuelMode,
+  displayName: string,
+  handle?: string
+): Promise<CreateDuelResponse> {
+  const query = handle ? `?handle=${encodeURIComponent(handle)}` : "";
+  return v1Fetch(`/api/v1/duels${query}`, {
+    method: "POST",
+    body: JSON.stringify({ mode, display_name: displayName }),
+  });
+}
+
+export function previewDuelInvite(inviteCode: string): Promise<DuelInvitePreview> {
+  return v1Fetch(`/api/v1/duels/invite/${encodeURIComponent(inviteCode)}`);
+}
+
+export function joinDuel(
+  inviteCode: string,
+  displayName: string,
+  handle?: string
+): Promise<{ duel_id: string; status: string; already_member: boolean; role: string }> {
+  return v1Fetch("/api/v1/duels/join", {
+    method: "POST",
+    body: JSON.stringify({
+      invite_code: inviteCode.trim(),
+      display_name: displayName,
+      handle: handle ?? undefined,
+    }),
+  });
+}
+
+export function getDuel(duelId: string, handle?: string): Promise<DuelDetail> {
+  const query = handle ? `?handle=${encodeURIComponent(handle)}` : "";
+  return v1Fetch(`/api/v1/duels/${encodeURIComponent(duelId)}${query}`);
+}
+
+export function startDuel(duelId: string, handle?: string): Promise<DuelDetail> {
+  const query = handle ? `?handle=${encodeURIComponent(handle)}` : "";
+  return v1Fetch(`/api/v1/duels/${encodeURIComponent(duelId)}/start${query}`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
+export function submitDuel(
+  duelId: string,
+  payload: {
+    language: "cpp17" | "python3";
+    source_code: string;
+    stdin?: string;
+    expected_output?: string | null;
+  },
+  handle?: string
+): Promise<{
+  submission_id: string;
+  judge_status: string;
+  passed: boolean;
+  runtime_ms: number | null;
+  memory_kb: number | null;
+  message: string;
+  duel: DuelDetail;
+}> {
+  const query = handle ? `?handle=${encodeURIComponent(handle)}` : "";
+  return v1Fetch(`/api/v1/duels/${encodeURIComponent(duelId)}/submit${query}`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function getDuelResult(
+  duelId: string,
+  handle?: string
+): Promise<{
+  duel_id: string;
+  status: DuelStatus;
+  winner_subject: string | null;
+  result_reason: string | null;
+  completed_at: string | null;
+  participants: DuelParticipant[];
+  problem: DuelProblem;
+  viewer_won: boolean;
+  is_draw: boolean;
+}> {
+  const query = handle ? `?handle=${encodeURIComponent(handle)}` : "";
+  return v1Fetch(`/api/v1/duels/${encodeURIComponent(duelId)}/result${query}`);
+}
+
 // ─── Endpoints ────────────────────────────────────────────────────────────────
 
 export function getMyEntitlements(): Promise<EntitlementsResponse> {

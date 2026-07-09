@@ -566,6 +566,27 @@ export function GamificationWidget({ handle }: { handle: string }) {
       )}
 
       <PrivateLeaderboardSection handle={handle} />
+
+      <div style={{ marginTop: "10px" }}>
+        <a
+          href={`/duels?handle=${encodeURIComponent(handle)}`}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "6px",
+            fontSize: "12px",
+            fontWeight: 600,
+            color: COLORS.cyan,
+            textDecoration: "none",
+            padding: "8px 12px",
+            borderRadius: "8px",
+            border: `1px solid ${COLORS.border}`,
+            background: COLORS.bg,
+          }}
+        >
+          Friend 1v1 duels →
+        </a>
+      </div>
     </div>
   );
 }

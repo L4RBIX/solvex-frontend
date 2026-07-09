@@ -57,6 +57,22 @@ function problemUrl(problemId: string): string | null {
   return `https://codeforces.com/problemset/problem/${match[1]}/${match[2]}`;
 }
 
+/** Precise, actionable copy per backend warning code, instead of one generic
+ * "sync more history" message that's wrong when analysis already ran but the
+ * shared problem catalog/skill map wasn't ready. */
+function emptyQueueMessage(warnings: string[]): string {
+  if (warnings.includes("no_analysis_run_found_run_weakness_analyze_first")) {
+    return "No candidates available yet — run an analysis first.";
+  }
+  if (warnings.includes("analysis_found_but_no_skill_profiles_available_check_problem_catalog")) {
+    return "Your analysis is ready, but the problem catalog isn't loaded yet. Please try again shortly.";
+  }
+  if (warnings.includes("insufficient_candidates")) {
+    return "No fresh candidates left in your weak skills right now — check back after your next sync.";
+  }
+  return "No candidates available yet — sync more history first.";
+}
+
 function Card({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
   return (
     <div
@@ -325,7 +341,7 @@ export function V1TrainingPanel({ handle }: { handle: string }) {
         <>
           <PanelTitle
             title="Today's queue"
-            subtitle={queue.items.length ? `Queue for ${queue.queue_date}` : "No candidates available yet — sync more history first."}
+            subtitle={queue.items.length ? `Queue for ${queue.queue_date}` : emptyQueueMessage(queue.warnings ?? [])}
           />
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(260px,1fr))", gap: "12px" }}>
             {queue.items.map((item) =>
@@ -362,6 +378,13 @@ export function V1TrainingPanel({ handle }: { handle: string }) {
       {plan7 && (
         <>
           <PanelTitle title="7-day plan" subtitle={`Starts ${plan7.start_date}`} />
+          {plan7.days.length === 0 ? (
+            <Card>
+              <span style={{ fontSize: "13px", color: COLORS.muted }}>
+                Run an analysis first to generate your 7-day plan.
+              </span>
+            </Card>
+          ) : (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(220px,1fr))", gap: "12px" }}>
             {plan7.days.map((day) =>
               day.locked ? (
@@ -382,6 +405,7 @@ export function V1TrainingPanel({ handle }: { handle: string }) {
               )
             )}
           </div>
+          )}
         </>
       )}
 
@@ -418,6 +442,13 @@ export function V1TrainingPanel({ handle }: { handle: string }) {
       {plan14 && (
         <>
           <PanelTitle title="14-day plan" subtitle={`Starts ${plan14.start_date}`} />
+          {plan14.days.length === 0 ? (
+            <Card>
+              <span style={{ fontSize: "13px", color: COLORS.muted }}>
+                Run an analysis first to generate your 14-day plan.
+              </span>
+            </Card>
+          ) : (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(220px,1fr))", gap: "12px" }}>
             {plan14.days.map((day) => (
               <Card key={day.day_number}>
@@ -432,6 +463,7 @@ export function V1TrainingPanel({ handle }: { handle: string }) {
               </Card>
             ))}
           </div>
+          )}
         </>
       )}
 

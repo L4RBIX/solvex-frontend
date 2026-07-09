@@ -11,7 +11,7 @@
  * G2 fields are optional in the API response — if the backend returns a G1-only
  * shape, the widget still renders core stats and simply hides the new sections.
  *
- * No leaderboard, no duels, no social comparison, no public profile.
+ * G3 adds an isolated private-leaderboard section (invite-only weekly groups).
  */
 
 import { useCallback, useEffect, useState } from "react";
@@ -21,6 +21,7 @@ import {
   V1ApiError,
   getGamification,
 } from "@/lib/v1Api";
+import { PrivateLeaderboardSection } from "@/components/analyze/PrivateLeaderboardSection";
 
 const COLORS = {
   bg: "#06100D",
@@ -563,6 +564,8 @@ export function GamificationWidget({ handle }: { handle: string }) {
           <MilestonesRow milestones={milestones} />
         </SectionCard>
       )}
+
+      <PrivateLeaderboardSection handle={handle} />
     </div>
   );
 }

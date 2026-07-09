@@ -294,6 +294,85 @@ export function getGamification(handle?: string): Promise<GamificationSnapshot> 
   return v1Fetch<GamificationSnapshot>(`/api/v1/gamification/me${query}`);
 }
 
+// ─── Private leaderboards (Phase G3) ─────────────────────────────────────────
+//
+// Invite-only weekly groups — no global leaderboard, no public profiles.
+
+export interface LeaderboardSummary {
+  leaderboard_id: string;
+  name: string;
+  visibility: string;
+  member_role?: string;
+  joined_at?: string;
+  created_at?: string;
+}
+
+export interface LeaderboardWeeklyEntry {
+  rank: number;
+  display_name: string;
+  handle: string | null;
+  weekly_xp: number;
+  level: number;
+  active_days: number;
+  daily_goals_completed: number;
+  feedback_count: number;
+  badges_earned_this_week: number;
+}
+
+export interface LeaderboardWeeklyResponse {
+  leaderboard_id: string;
+  name: string;
+  visibility: string;
+  week_start: string;
+  viewer_rank: number | null;
+  entries: LeaderboardWeeklyEntry[];
+}
+
+export interface CreateLeaderboardResponse extends LeaderboardSummary {
+  invite_code: string;
+  invite_expires_at?: string;
+}
+
+export function listLeaderboards(handle?: string): Promise<{ leaderboards: LeaderboardSummary[] }> {
+  const query = handle ? `?handle=${encodeURIComponent(handle)}` : "";
+  return v1Fetch(`/api/v1/leaderboards${query}`);
+}
+
+export function createLeaderboard(
+  name: string,
+  displayName: string,
+  handle?: string
+): Promise<CreateLeaderboardResponse> {
+  const query = handle ? `?handle=${encodeURIComponent(handle)}` : "";
+  return v1Fetch(`/api/v1/leaderboards${query}`, {
+    method: "POST",
+    body: JSON.stringify({ name, display_name: displayName }),
+  });
+}
+
+export function joinLeaderboard(
+  inviteCode: string,
+  displayName: string,
+  handle?: string
+): Promise<{ leaderboard_id: string; name: string; member_role: string; already_member: boolean }> {
+  return v1Fetch("/api/v1/leaderboards/join", {
+    method: "POST",
+    body: JSON.stringify({
+      invite_code: inviteCode.trim(),
+      display_name: displayName,
+      handle: handle ?? undefined,
+    }),
+  });
+}
+
+export function getLeaderboardWeekly(
+  leaderboardId: string,
+  handle?: string
+): Promise<LeaderboardWeeklyResponse> {
+  const query = handle ? `?handle=${encodeURIComponent(handle)}` : "";
+  return v1Fetch(`/api/v1/leaderboards/${encodeURIComponent(leaderboardId)}/weekly${query}`);
+}
+
 // ─── Endpoints ────────────────────────────────────────────────────────────────
 
 export function getMyEntitlements(): Promise<EntitlementsResponse> {

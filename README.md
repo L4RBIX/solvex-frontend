@@ -50,3 +50,4 @@ npm run build
 - Build command: `npm run build`
 - Output directory: Vercel auto / blank
 - Environment variable: `NEXT_PUBLIC_API_URL=https://web-production-3ea15.up.railway.app`
+- Production branch: `main`

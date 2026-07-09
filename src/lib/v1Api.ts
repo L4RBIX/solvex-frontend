@@ -183,11 +183,12 @@ export interface SyncResponse {
   reused?: boolean;
 }
 
-// ─── Gamification (Phase G1) ─────────────────────────────────────────────────
+// ─── Gamification (Phase G1 + G2) ────────────────────────────────────────────
 //
-// Lightweight retention layer (XP, levels, streak, daily goal, badges) derived
-// server-side from real training actions only — no leaderboard, no duels, no
-// social comparison, no payment/admin data ever appears here.
+// Lightweight retention layer (XP, levels, streak, daily goal, badges, quests,
+// activity timeline) derived server-side from real training actions only — no
+// leaderboard, no duels, no social comparison, no payment/admin data ever
+// appears here.
 
 export interface GamificationLevelProgress {
   current_level_xp: number;
@@ -216,11 +217,60 @@ export interface GamificationDailyGoal {
   items: GamificationDailyGoalItem[];
 }
 
+export type GamificationBadgeCategory = "onboarding" | "consistency" | "verification" | "premium";
+export type GamificationBadgeRarity = "common" | "uncommon" | "rare";
+
 export interface GamificationBadge {
   id: string;
   name: string;
   description: string;
   earned_at: string;
+  category?: GamificationBadgeCategory;
+  rarity?: GamificationBadgeRarity;
+}
+
+export interface GamificationXpEvent {
+  event_type: string;
+  label: string;
+  xp_awarded: number;
+  occurred_at: string;
+  daily_cap_applied: boolean;
+}
+
+export interface GamificationDailyQuest {
+  id: string;
+  label: string;
+  completed: boolean;
+  completed_at: string | null;
+}
+
+export interface GamificationDailyQuests {
+  date: string;
+  completed_count: number;
+  total_count: number;
+  quests: GamificationDailyQuest[];
+}
+
+export interface GamificationWeeklyQuest {
+  id: string;
+  label: string;
+  completed: boolean;
+  progress: number;
+  target: number;
+}
+
+export interface GamificationWeeklyQuests {
+  week_start: string;
+  completed_count: number;
+  total_count: number;
+  quests: GamificationWeeklyQuest[];
+}
+
+export interface GamificationMilestone {
+  id: string;
+  label: string;
+  progress: number;
+  target: number;
 }
 
 export interface GamificationSnapshot {
@@ -232,6 +282,11 @@ export interface GamificationSnapshot {
   streak: GamificationStreak;
   daily_goal: GamificationDailyGoal;
   badges: GamificationBadge[];
+  // G2 fields — optional so an older backend response (G1-only) never crashes the widget.
+  recent_xp_events?: GamificationXpEvent[];
+  daily_quests?: GamificationDailyQuests;
+  weekly_quests?: GamificationWeeklyQuests;
+  milestones?: GamificationMilestone[];
 }
 
 export function getGamification(handle?: string): Promise<GamificationSnapshot> {

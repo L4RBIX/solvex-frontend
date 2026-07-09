@@ -1,20 +1,22 @@
 "use client";
 
 /**
- * SolveX gamification widget (Phase G1): XP, level, streak, daily goal, and
- * earned badges for the current handle, rendered near the v1 training panel.
+ * SolveX gamification widget (Phase G1 + G2): XP, level, streak, daily goal,
+ * badges, recent activity breakdown, daily/weekly quests, and milestones.
  *
  * This widget is intentionally isolated: it fetches and renders on its own,
  * catches its own errors, and never throws. A failed or slow gamification
- * call must never break analysis, the daily queue, plans, Arena, or Copilot —
- * it just falls back to a small inline error card with a retry button.
+ * call must never break analysis, the daily queue, plans, Arena, or Copilot.
  *
- * No leaderboard, no duels, no social comparison, no public profile: this
- * view only ever shows the current handle's own private progress.
+ * G2 fields are optional in the API response — if the backend returns a G1-only
+ * shape, the widget still renders core stats and simply hides the new sections.
+ *
+ * No leaderboard, no duels, no social comparison, no public profile.
  */
 
 import { useCallback, useEffect, useState } from "react";
 import {
+  GamificationBadge,
   GamificationSnapshot,
   V1ApiError,
   getGamification,
@@ -29,6 +31,12 @@ const COLORS = {
   cyan: "#00D9F5",
   amber: "#FFAA33",
   red: "#FF4D6D",
+};
+
+const RARITY_COLORS: Record<string, string> = {
+  common: COLORS.cyan,
+  uncommon: COLORS.amber,
+  rare: COLORS.mint,
 };
 
 type Status = "loading" | "ready" | "error";
@@ -52,13 +60,45 @@ function ProgressBar({ percent, color }: { percent: number; color: string }) {
   );
 }
 
-function StatCard({
+function SectionCard({
   title,
+  subtitle,
   children,
 }: {
   title: string;
+  subtitle?: string;
   children: React.ReactNode;
 }) {
+  return (
+    <div
+      style={{
+        background: COLORS.bg,
+        border: `1px solid ${COLORS.border}`,
+        borderRadius: "12px",
+        padding: "14px 16px",
+        minWidth: 0,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: "8px", marginBottom: "10px" }}>
+        <div
+          style={{
+            fontSize: "10.5px",
+            fontWeight: 700,
+            color: COLORS.muted,
+            textTransform: "uppercase",
+            letterSpacing: "0.07em",
+          }}
+        >
+          {title}
+        </div>
+        {subtitle && <span style={{ fontSize: "11px", color: COLORS.muted }}>{subtitle}</span>}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function StatCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div
       className="gami-stat-card"
@@ -164,6 +204,139 @@ function GamificationError({ onRetry }: { onRetry: () => void }) {
   );
 }
 
+function shortXpLabel(label: string): string {
+  const map: Record<string, string> = {
+    "Upgraded to premium": "Beta Premium",
+    "Completed first analysis": "First Diagnosis",
+    "Generated first queue": "Queued Up",
+    "Generated today's queue": "Today's Queue",
+    "Submitted problem feedback": "Feedback",
+    "Viewed weekly report": "Weekly Report",
+    "Attempted SkillTrace verification": "SkillTrace",
+    "Started a training plan": "Plan Started",
+  };
+  return map[label] ?? label;
+}
+
+function RecentActivity({ events }: { events: NonNullable<GamificationSnapshot["recent_xp_events"]> }) {
+  const visible = events.filter((e) => e.xp_awarded > 0 || e.daily_cap_applied).slice(0, 8);
+  if (visible.length === 0) {
+    return (
+      <p style={{ fontSize: "12px", color: COLORS.muted, margin: 0 }}>
+        Complete an analysis or generate a queue to start earning XP.
+      </p>
+    );
+  }
+  return (
+    <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: "6px" }}>
+      {visible.map((event, i) => (
+        <li
+          key={`${event.event_type}-${event.occurred_at}-${i}`}
+          style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", fontSize: "12px" }}
+        >
+          <span style={{ color: COLORS.text, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {shortXpLabel(event.label)}
+          </span>
+          <span style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: "6px" }}>
+            {event.daily_cap_applied && event.xp_awarded === 0 && (
+              <span style={{ fontSize: "10px", color: COLORS.muted }}>capped</span>
+            )}
+            <span
+              style={{
+                fontWeight: 700,
+                color: event.xp_awarded > 0 ? COLORS.mint : COLORS.muted,
+              }}
+            >
+              {event.xp_awarded > 0 ? `+${event.xp_awarded}` : "0"} XP
+            </span>
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function QuestList({
+  quests,
+  showProgress,
+}: {
+  quests: { id: string; label: string; completed: boolean; progress?: number; target?: number }[];
+  showProgress?: boolean;
+}) {
+  return (
+    <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: "5px" }}>
+      {quests.map((q) => (
+        <li
+          key={q.id}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "8px",
+            fontSize: "12px",
+            color: q.completed ? COLORS.mint : COLORS.muted,
+          }}
+        >
+          <span aria-hidden style={{ fontSize: "11px", flexShrink: 0 }}>
+            {q.completed ? "✓" : "○"}
+          </span>
+          <span style={{ flex: 1, minWidth: 0, color: q.completed ? COLORS.text : COLORS.muted }}>
+            {q.label}
+          </span>
+          {showProgress && q.target !== undefined && q.progress !== undefined && !q.completed && (
+            <span style={{ fontSize: "10px", color: COLORS.muted, flexShrink: 0 }}>
+              {q.progress}/{q.target}
+            </span>
+          )}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function BadgePill({ badge }: { badge: GamificationBadge }) {
+  const color = RARITY_COLORS[badge.rarity ?? "common"] ?? COLORS.cyan;
+  return (
+    <span
+      title={`${badge.description}${badge.category ? ` · ${badge.category}` : ""}`}
+      style={{
+        fontSize: "11px",
+        fontWeight: 600,
+        color,
+        background: `${color}14`,
+        border: `1px solid ${color}33`,
+        borderRadius: "999px",
+        padding: "3px 10px",
+        whiteSpace: "nowrap",
+      }}
+    >
+      {badge.name}
+    </span>
+  );
+}
+
+function MilestonesRow({ milestones }: { milestones: NonNullable<GamificationSnapshot["milestones"]> }) {
+  const visible = milestones.slice(0, 3);
+  if (visible.length === 0) return null;
+  return (
+    <div className="gami-milestones" style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+      {visible.map((m) => {
+        const pct = m.target > 0 ? Math.round((m.progress / m.target) * 100) : 0;
+        return (
+          <div key={m.id}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: COLORS.muted, marginBottom: "4px" }}>
+              <span>{m.label}</span>
+              <span>
+                {m.progress}/{m.target}
+              </span>
+            </div>
+            <ProgressBar percent={pct} color={COLORS.cyan} />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export function GamificationWidget({ handle }: { handle: string }) {
   const [status, setStatus] = useState<Status>("loading");
   const [data, setData] = useState<GamificationSnapshot | null>(null);
@@ -180,8 +353,6 @@ export function GamificationWidget({ handle }: { handle: string }) {
       setData(snapshot);
       setStatus("ready");
     } catch (err) {
-      // Never let a gamification failure surface as an unhandled error —
-      // the analyze page, queue, plans, and Copilot must keep working.
       void (err instanceof V1ApiError ? err.message : err);
       setData(null);
       setStatus("error");
@@ -189,9 +360,6 @@ export function GamificationWidget({ handle }: { handle: string }) {
   }, [handle]);
 
   useEffect(() => {
-    // `load()` sets loading/ready/error state from an external system (the
-    // gamification API); this mirrors the same pattern already used for the
-    // v1 training panel's token/plan refresh.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
   }, [load]);
@@ -215,10 +383,14 @@ export function GamificationWidget({ handle }: { handle: string }) {
     );
   }
 
-  if (!data) return null; // no handle yet — render nothing rather than an empty shell
+  if (!data) return null;
 
   const isEmpty = data.xp_total === 0 && data.badges.length === 0 && data.streak.current === 0;
   const earnedBadges = data.badges;
+  const recentEvents = data.recent_xp_events;
+  const dailyQuests = data.daily_quests;
+  const weeklyQuests = data.weekly_quests;
+  const milestones = data.milestones;
 
   return (
     <div className="gami-widget" style={{ marginBottom: "24px" }}>
@@ -234,8 +406,14 @@ export function GamificationWidget({ handle }: { handle: string }) {
           gap: 8px;
           margin-top: 10px;
         }
+        .gami-quests-grid {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 10px;
+        }
         @media (max-width: 640px) {
           .gami-grid { grid-template-columns: 1fr; }
+          .gami-quests-grid { grid-template-columns: 1fr; }
           .gami-header-row { flex-direction: column; align-items: flex-start !important; gap: 10px !important; }
         }
       `}</style>
@@ -288,7 +466,7 @@ export function GamificationWidget({ handle }: { handle: string }) {
             <ProgressBar percent={data.level_progress.progress_percent} color={COLORS.mint} />
           </div>
         </div>
-        {isEmpty && (
+        {isEmpty && !recentEvents?.length && (
           <p style={{ fontSize: "12px", color: COLORS.muted, marginTop: "12px", marginBottom: 0 }}>
             Run an analysis or generate today&apos;s queue to start earning XP.
           </p>
@@ -296,7 +474,7 @@ export function GamificationWidget({ handle }: { handle: string }) {
       </div>
 
       {/* Streak / daily goal / badges */}
-      <div className="gami-grid">
+      <div className="gami-grid" style={{ marginBottom: "10px" }}>
         <StatCard title="Streak">
           <div style={{ display: "flex", alignItems: "baseline", gap: "6px" }}>
             <span style={{ fontSize: "20px", fontWeight: 800, color: COLORS.text, letterSpacing: "-0.02em" }}>
@@ -312,7 +490,14 @@ export function GamificationWidget({ handle }: { handle: string }) {
 
         <StatCard title="Daily goal">
           <div style={{ display: "flex", alignItems: "baseline", gap: "6px" }}>
-            <span style={{ fontSize: "20px", fontWeight: 800, color: data.daily_goal.completed ? COLORS.mint : COLORS.text, letterSpacing: "-0.02em" }}>
+            <span
+              style={{
+                fontSize: "20px",
+                fontWeight: 800,
+                color: data.daily_goal.completed ? COLORS.mint : COLORS.text,
+                letterSpacing: "-0.02em",
+              }}
+            >
               {data.daily_goal.completed_count}/{data.daily_goal.required_count}
             </span>
             {data.daily_goal.completed && <span aria-hidden style={{ fontSize: "13px" }}>✅</span>}
@@ -332,22 +517,7 @@ export function GamificationWidget({ handle }: { handle: string }) {
           {earnedBadges.length > 0 ? (
             <div className="gami-badges-row">
               {earnedBadges.map((badge) => (
-                <span
-                  key={badge.id}
-                  title={badge.description}
-                  style={{
-                    fontSize: "11px",
-                    fontWeight: 600,
-                    color: COLORS.cyan,
-                    background: "rgba(0,217,245,0.08)",
-                    border: "1px solid rgba(0,217,245,0.2)",
-                    borderRadius: "999px",
-                    padding: "3px 10px",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {badge.name}
-                </span>
+                <BadgePill key={badge.id} badge={badge} />
               ))}
             </div>
           ) : (
@@ -355,6 +525,44 @@ export function GamificationWidget({ handle }: { handle: string }) {
           )}
         </StatCard>
       </div>
+
+      {/* G2: Recent XP activity */}
+      {recentEvents && (
+        <div style={{ marginBottom: "10px" }}>
+          <SectionCard title="Recent activity">
+            <RecentActivity events={recentEvents} />
+          </SectionCard>
+        </div>
+      )}
+
+      {/* G2: Daily + weekly quests */}
+      {(dailyQuests || weeklyQuests) && (
+        <div className="gami-quests-grid" style={{ marginBottom: "10px" }}>
+          {dailyQuests && (
+            <SectionCard
+              title="Daily quests"
+              subtitle={`${dailyQuests.completed_count}/${dailyQuests.total_count}`}
+            >
+              <QuestList quests={dailyQuests.quests} />
+            </SectionCard>
+          )}
+          {weeklyQuests && (
+            <SectionCard
+              title="Weekly quests"
+              subtitle={`${weeklyQuests.completed_count}/${weeklyQuests.total_count}`}
+            >
+              <QuestList quests={weeklyQuests.quests} showProgress />
+            </SectionCard>
+          )}
+        </div>
+      )}
+
+      {/* G2: Milestones (max 3) */}
+      {milestones && milestones.length > 0 && (
+        <SectionCard title="Next milestones">
+          <MilestonesRow milestones={milestones} />
+        </SectionCard>
+      )}
     </div>
   );
 }

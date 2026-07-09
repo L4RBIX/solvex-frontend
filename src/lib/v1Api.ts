@@ -493,9 +493,108 @@ export function getDuel(duelId: string, handle?: string): Promise<DuelDetail> {
   return v1Fetch(`/api/v1/duels/${encodeURIComponent(duelId)}${query}`);
 }
 
-export function startDuel(duelId: string, handle?: string): Promise<DuelDetail> {
+export function startDuel(
+  duelId: string,
+  handle?: string
+): Promise<DuelDetail & { arena_path?: string }> {
   const query = handle ? `?handle=${encodeURIComponent(handle)}` : "";
   return v1Fetch(`/api/v1/duels/${encodeURIComponent(duelId)}/start${query}`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
+// ─── Live duel room (Phase G4.1) ─────────────────────────────────────────────
+//
+// Lightweight state polled every 1–2s by the waiting room and the duel Arena.
+// Never contains source code, invite hashes, Judge0 config, or hidden tests.
+
+export interface DuelParticipantState {
+  display_name: string;
+  handle: string | null;
+  role: string;
+  is_viewer: boolean;
+  ready: boolean;
+  ready_at: string | null;
+  joined_at: string;
+  arena_opened: boolean;
+  submission_count: number;
+  wrong_attempts: number;
+  hint_count: number;
+  judging: boolean;
+  accepted: boolean;
+  accepted_at: string | null;
+  seconds_to_accept: number | null;
+  final_status: string;
+  is_winner: boolean;
+}
+
+export interface DuelResultState {
+  status: DuelStatus;
+  winner_display_name: string | null;
+  result_reason: string | null;
+  completed_at: string | null;
+  viewer_won: boolean;
+  is_draw: boolean;
+  xp_awarded: number;
+}
+
+export interface DuelState {
+  duel_id: string;
+  mode: DuelMode;
+  status: DuelStatus;
+  server_time: string;
+  countdown_seconds: number;
+  countdown_started_at: string | null;
+  starts_at: string | null;
+  expires_at: string;
+  arena_path: string;
+  duration_minutes: number;
+  hints_max: number;
+  judging_mode: string;
+  judging_note: string;
+  problem: DuelProblem;
+  skill_id?: string | null;
+  participants: DuelParticipantState[];
+  result: DuelResultState | null;
+}
+
+export interface DuelHintResponse {
+  duel_id: string;
+  hint_number: number;
+  hint_text: string;
+  hints_used: number;
+  hints_remaining: number;
+  note?: string;
+}
+
+export function getDuelState(duelId: string, handle?: string): Promise<DuelState> {
+  const query = handle ? `?handle=${encodeURIComponent(handle)}` : "";
+  return v1Fetch(`/api/v1/duels/${encodeURIComponent(duelId)}/state${query}`);
+}
+
+export function readyDuel(duelId: string, handle?: string): Promise<DuelState> {
+  const query = handle ? `?handle=${encodeURIComponent(handle)}` : "";
+  return v1Fetch(`/api/v1/duels/${encodeURIComponent(duelId)}/ready${query}`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
+export function openDuelArena(
+  duelId: string,
+  handle?: string
+): Promise<{ duel_id: string; arena_opened_at: string | null }> {
+  const query = handle ? `?handle=${encodeURIComponent(handle)}` : "";
+  return v1Fetch(`/api/v1/duels/${encodeURIComponent(duelId)}/open-arena${query}`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
+export function requestDuelHint(duelId: string, handle?: string): Promise<DuelHintResponse> {
+  const query = handle ? `?handle=${encodeURIComponent(handle)}` : "";
+  return v1Fetch(`/api/v1/duels/${encodeURIComponent(duelId)}/hint${query}`, {
     method: "POST",
     body: JSON.stringify({}),
   });

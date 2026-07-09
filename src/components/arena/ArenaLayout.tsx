@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { Terminal, FlaskConical, Bot } from "lucide-react";
 import ArenaHeader from "./ArenaHeader";
@@ -9,9 +9,13 @@ import CodeEditor from "./CodeEditor";
 import TestCasePanel from "./TestCasePanel";
 import OutputConsole from "./OutputConsole";
 import CopilotPanel from "./CopilotPanel";
+import { DuelResultOverlay, DuelStatusBar } from "./DuelPanel";
 import { runCode, submitCode } from "@/lib/executionApi";
 import type { CopilotMessage } from "@/lib/copilotApi";
-import type { ExecutionLanguage, ExecutionResult } from "@/types/execution";
+import type { DuelHintResponse } from "@/lib/v1Api";
+import { V1ApiError, openDuelArena, requestDuelHint, submitDuel } from "@/lib/v1Api";
+import { useDuelState } from "@/hooks/useDuelState";
+import type { ExecutionLanguage, ExecutionResult, ExecutionStatus } from "@/types/execution";
 import { JUDGE0_LANGUAGE_MAP } from "@/types/execution";
 import type { ArenaProblem, ArenaEvent, ArenaEventType, CodeSnapshot, TestCase } from "@/types/arena";
 import type { editor } from "monaco-editor";
@@ -81,13 +85,53 @@ function saveSnaps(key: string, snaps: CodeSnapshot[]) {
 
 type RightTab = "tests" | "console" | "copilot";
 
+const DUEL_JUDGE_STATUSES: ReadonlyArray<ExecutionStatus> = [
+  "accepted", "wrong_answer", "runtime_error", "time_limit", "compilation_error", "error",
+];
+
+function toExecutionStatus(status: string): ExecutionStatus {
+  return (DUEL_JUDGE_STATUSES as string[]).includes(status) ? (status as ExecutionStatus) : "error";
+}
+
 export default function ArenaLayout() {
   const searchParams = useSearchParams();
   const problemParam = searchParams.get("problem");
   const handleParam = searchParams.get("handle") ?? undefined;
+  const duelParam = searchParams.get("duel");
 
-  const problem = SAMPLE_PROBLEM;
-  const effectiveKey = problemParam ?? problem.key;
+  // Duel mode (Phase G4.1): poll shared state every 2s; never breaks normal Arena.
+  const duel = useDuelState(duelParam, handleParam, 2000);
+  const duelState = duel.state;
+
+  const duelProblemData = duelState?.problem ?? null;
+  const duelJudgingNote = duelState?.judging_note ?? "";
+  const duelProblem: ArenaProblem | null = useMemo(
+    () =>
+      duelProblemData
+        ? {
+            key: duelProblemData.problem_id,
+            name: duelProblemData.name,
+            rating: duelProblemData.rating ?? 0,
+            tags: duelProblemData.tags ?? [],
+            time_limit: "see Codeforces",
+            memory_limit: "see Codeforces",
+            statement:
+              `Duel problem: ${duelProblemData.name}. SolveX does not store official Codeforces statements — ` +
+              `open the problem on Codeforces (link above) to read it.\n\n${duelJudgingNote}`,
+            input_format: "See the official statement on Codeforces.",
+            output_format: "See the official statement on Codeforces.",
+            sample_tests: [],
+            notes:
+              "Add a test case (input + expected output from the statement's samples), write your solution, " +
+              "and Submit. First accepted wins — if both accept, fewer hints, then earlier accept, then fewer wrong attempts.",
+            is_sample: false,
+          }
+        : null,
+    [duelProblemData, duelJudgingNote]
+  );
+
+  const problem = duelProblem ?? SAMPLE_PROBLEM;
+  const effectiveKey = duelProblem?.key ?? problemParam ?? problem.key;
 
   const [language, setLanguage] = useState<ExecutionLanguage>("cpp17");
   const [code, setCode] = useState<string>(() => JUDGE0_LANGUAGE_MAP.cpp17.starter_template);
@@ -103,6 +147,12 @@ export default function ArenaLayout() {
   // Copilot conversation state lifted here so it survives tab switches
   const [copilotMessages, setCopilotMessages] = useState<CopilotMessage[]>([]);
   const [copilotHelpLevel, setCopilotHelpLevel] = useState<number>(2);
+  // Duel mode UI state
+  const [duelHints, setDuelHints] = useState<DuelHintResponse[]>([]);
+  const [hintLoading, setHintLoading] = useState(false);
+  const [hintError, setHintError] = useState<string | null>(null);
+  const [resultDismissed, setResultDismissed] = useState(false);
+  const duelKeyRef = useRef<string | null>(null);
 
   const codeRef = useRef(code);
   const prevCodeRef = useRef(code);
@@ -182,6 +232,28 @@ export default function ArenaLayout() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Duel mode: arena-open telemetry (fire and forget — never blocks the Arena).
+  useEffect(() => {
+    if (duelParam) void openDuelArena(duelParam, handleParam).catch(() => {});
+  }, [duelParam, handleParam]);
+
+  // Duel mode: when the duel problem loads, start from one empty custom test —
+  // the player copies a sample from the official statement.
+  useEffect(() => {
+    if (!duelProblem || duelKeyRef.current === duelProblem.key) return;
+    duelKeyRef.current = duelProblem.key;
+    setTestCases([
+      {
+        id: makeId(),
+        input: "",
+        expected_output: "",
+        status: "not_run",
+        is_sample: false,
+        label: "Duel test 1",
+      },
+    ]);
+  }, [duelProblem]);
+
   function handleLanguageChange(lang: ExecutionLanguage) {
     setLanguage(lang);
     addEvent("language_changed", { from: language, to: lang });
@@ -253,7 +325,74 @@ export default function ArenaLayout() {
     setIsRunning(false);
   }
 
+  async function handleDuelSubmit() {
+    if (!duelParam) return;
+    const tc = testCases.find((t) => t.expected_output.trim());
+    if (!tc) {
+      setResult({
+        status: "error",
+        stdout: "",
+        stderr: "",
+        is_mock: false,
+        message:
+          "Duel judging needs a test: add input + expected output (copy a sample from the official statement), then Submit.",
+      });
+      setRightTab("console");
+      return;
+    }
+    setIsSubmitting(true);
+    setResult(null);
+    addEvent("submit_clicked", { duel_id: duelParam });
+    persistSnapshot("submit");
+    setRightTab("console");
+    try {
+      const res = await submitDuel(
+        duelParam,
+        {
+          language,
+          source_code: codeRef.current,
+          stdin: tc.input,
+          expected_output: tc.expected_output,
+        },
+        handleParam
+      );
+      const status = toExecutionStatus(res.judge_status);
+      setResult({
+        status,
+        stdout: "",
+        stderr: "",
+        time_ms: res.runtime_ms ?? undefined,
+        memory_kb: res.memory_kb ?? undefined,
+        is_mock: false,
+        passed: res.passed,
+        message: res.passed
+          ? res.duel.status === "completed"
+            ? "Accepted — duel decided!"
+            : "Accepted! Waiting for the final verdict…"
+          : res.message || res.judge_status,
+      });
+      addEvent("result_received", { status, is_mock: false });
+      setTestCases((prev) => prev.map((t) => (t.id === tc.id ? { ...t, status } : t)));
+      void duel.refresh();
+    } catch (e) {
+      setResult({
+        status: "error",
+        stdout: "",
+        stderr: "",
+        is_mock: false,
+        message: e instanceof V1ApiError ? e.message : "Duel submit failed — check your connection and try again.",
+      });
+      void duel.refresh();
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
   async function handleSubmit() {
+    if (duelParam) {
+      await handleDuelSubmit();
+      return;
+    }
     setIsSubmitting(true);
     setResult(null);
     addEvent("submit_clicked");
@@ -270,6 +409,23 @@ export default function ArenaLayout() {
     setResult(res);
     addEvent("result_received", { status: res.status, is_mock: res.is_mock });
     setIsSubmitting(false);
+  }
+
+  async function handleUseHint() {
+    if (!duelParam) return;
+    setHintLoading(true);
+    setHintError(null);
+    try {
+      const hint = await requestDuelHint(duelParam, handleParam);
+      setDuelHints((prev) =>
+        prev.some((h) => h.hint_number === hint.hint_number) ? prev : [...prev, hint]
+      );
+      void duel.refresh();
+    } catch (e) {
+      setHintError(e instanceof V1ApiError ? e.message : "Hint unavailable right now.");
+    } finally {
+      setHintLoading(false);
+    }
   }
 
   function handleReset() {
@@ -312,7 +468,7 @@ export default function ArenaLayout() {
       }}
     >
       <ArenaHeader
-        problemKey={problemParam ?? problem.key}
+        problemKey={duelProblem?.key ?? problemParam ?? problem.key}
         problemName={problem.name}
         language={language}
         onLanguageChange={handleLanguageChange}
@@ -325,6 +481,31 @@ export default function ArenaLayout() {
         savedAt={savedAt}
         snapshotCount={snapshots.length}
       />
+
+      {/* Duel mode: live status strip (never rendered on normal /arena) */}
+      {duelParam && duelState && (
+        <DuelStatusBar
+          state={duelState}
+          hints={duelHints}
+          onUseHint={() => { void handleUseHint(); }}
+          hintLoading={hintLoading}
+          hintError={hintError}
+        />
+      )}
+      {duelParam && duel.fatalError && (
+        <div
+          style={{
+            padding: "8px 16px",
+            fontSize: "12px",
+            color: "#FFAA33",
+            borderBottom: "1px solid rgba(255,170,51,0.25)",
+            background: "rgba(255,170,51,0.06)",
+            flexShrink: 0,
+          }}
+        >
+          Duel unavailable: {duel.fatalError} — the normal Arena below still works.
+        </div>
+      )}
 
       {/* Main panels */}
       <div
@@ -471,6 +652,15 @@ export default function ArenaLayout() {
           </div>
         </div>
       </div>
+
+      {/* Duel result: win/lose/draw overlay with animation */}
+      {duelParam && duelState?.result && !resultDismissed && (
+        <DuelResultOverlay
+          state={duelState}
+          handle={handleParam ?? ""}
+          onDismiss={() => setResultDismissed(true)}
+        />
+      )}
 
       {/* Responsive styles */}
       <style>{`

@@ -1,25 +1,25 @@
 "use client";
 
 /**
- * Friend 1v1 duels page (Phase G4). Invite-link only — no matchmaking.
+ * Friend 1v1 duels hub (Phase G4 → G4.1). Invite-link only — no matchmaking.
+ *
+ * Create or join here; the live experience happens in /duels/[duelId]
+ * (waiting room, ready, countdown) and /arena?duel=<id> (the battle).
  * Failures here never break /analyze or /arena.
  */
 
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
-  CreateDuelResponse,
-  DuelDetail,
+  DuelInvitePreview,
   DuelMode,
   DuelSummary,
   V1ApiError,
   createDuel,
-  getDuel,
   joinDuel,
   listDuels,
-  startDuel,
-  submitDuel,
+  previewDuelInvite,
 } from "@/lib/v1Api";
 
 const COLORS = {
@@ -73,7 +73,7 @@ function statusLabel(status: string): string {
     case "waiting":
       return "Waiting for opponent";
     case "active":
-      return "Active";
+      return "Live now";
     case "completed":
       return "Completed";
     case "expired":
@@ -85,159 +85,139 @@ function statusLabel(status: string): string {
   }
 }
 
+function modeLabel(mode: string): string {
+  return mode === "classic_30" ? "Classic · 30 min" : "Rapid · 10 min";
+}
+
+function inviteStorageKey(duelId: string): string {
+  return `sx_duel_invite_${duelId}`;
+}
+
 function DuelsContent() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const handle = (searchParams.get("handle") || "").trim();
-  const duelParam = searchParams.get("duel");
+  const inviteParam = (searchParams.get("invite") || "").trim();
 
+  const [handleInput, setHandleInput] = useState(handle);
   const [displayName, setDisplayName] = useState(handle || "Player");
   const [mode, setMode] = useState<DuelMode>("rapid_10");
   const [inviteCode, setInviteCode] = useState("");
   const [list, setList] = useState<DuelSummary[]>([]);
-  const [selected, setSelected] = useState<DuelDetail | null>(null);
-  const [lastInvite, setLastInvite] = useState<string | null>(null);
-  const [msg, setMsg] = useState<string | null>(null);
+  const [preview, setPreview] = useState<DuelInvitePreview | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [busy, setBusy] = useState(false);
 
-  const [language, setLanguage] = useState<"python3" | "cpp17">("python3");
-  const [source, setSource] = useState("print(1)\n");
-  const [stdin, setStdin] = useState("");
-  const [expected, setExpected] = useState("1");
-  const [submitting, setSubmitting] = useState(false);
+  // Adjust derived state during render (React-recommended; avoids effect churn).
+  const [prevHandle, setPrevHandle] = useState(handle);
+  if (prevHandle !== handle) {
+    setPrevHandle(handle);
+    setHandleInput(handle);
+    setDisplayName(handle || "Player");
+  }
+  const [prevInvite, setPrevInvite] = useState(inviteParam);
+  if (prevInvite !== inviteParam) {
+    setPrevInvite(inviteParam);
+    setPreview(null);
+    setPreviewError(null);
+  }
 
-  const loadList = useCallback(async () => {
+  useEffect(() => {
     if (!handle) return;
-    try {
-      const res = await listDuels(handle);
-      setList(res.duels);
-    } catch {
-      // Isolated — list failure must not crash the page.
-    }
+    let cancelled = false;
+    listDuels(handle)
+      .then((res) => {
+        if (!cancelled) setList(res.duels);
+      })
+      .catch(() => {
+        // Isolated — list failure must not crash the page.
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [handle]);
 
-  const loadDuel = useCallback(
-    async (duelId: string) => {
-      if (!handle) return;
-      setLoading(true);
-      setErr(null);
-      try {
-        const detail = await getDuel(duelId, handle);
-        setSelected(detail);
-      } catch (e) {
-        setSelected(null);
-        setErr(e instanceof V1ApiError ? e.message : "Could not load duel.");
-      } finally {
-        setLoading(false);
-      }
+  // Invite link (?invite=<code>) → safe preview card with a Join button.
+  useEffect(() => {
+    if (!inviteParam) return;
+    let cancelled = false;
+    previewDuelInvite(inviteParam)
+      .then((p) => {
+        if (!cancelled) setPreview(p);
+      })
+      .catch((e) => {
+        if (!cancelled)
+          setPreviewError(
+            e instanceof V1ApiError && (e.status === 404 || e.status === 410)
+              ? "This invite is invalid or no longer joinable."
+              : "Could not load the invite. Try again."
+          );
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [inviteParam]);
+
+  const applyHandle = () => {
+    const next = handleInput.trim();
+    const params = new URLSearchParams(searchParams.toString());
+    if (next) params.set("handle", next);
+    else params.delete("handle");
+    router.replace(`/duels?${params.toString()}`);
+  };
+
+  const goToRoom = useCallback(
+    (duelId: string, invite?: string) => {
+      const params = new URLSearchParams();
+      if (handle) params.set("handle", handle);
+      if (invite) params.set("invite", invite);
+      router.push(`/duels/${encodeURIComponent(duelId)}?${params.toString()}`);
     },
-    [handle]
+    [handle, router]
   );
-
-  useEffect(() => {
-    setDisplayName(handle || "Player");
-    loadList();
-  }, [handle, loadList]);
-
-  useEffect(() => {
-    if (duelParam && handle) {
-      loadDuel(duelParam);
-    }
-  }, [duelParam, handle, loadDuel]);
 
   const onCreate = async () => {
     setErr(null);
-    setMsg(null);
     if (!handle) {
-      setErr("Add ?handle=your_cf_handle to the URL first.");
+      setErr("Set your Codeforces handle first.");
       return;
     }
+    setBusy(true);
     try {
-      const created: CreateDuelResponse = await createDuel(mode, displayName.trim() || handle, handle);
-      setLastInvite(created.invite_code);
-      setMsg(`Duel created. Share the invite code with a friend.`);
-      await loadList();
-      await loadDuel(created.duel_id);
+      const created = await createDuel(mode, displayName.trim() || handle, handle);
+      try {
+        window.sessionStorage.setItem(inviteStorageKey(created.duel_id), created.invite_code);
+      } catch {
+        /* sessionStorage unavailable — the room falls back to the query param */
+      }
+      goToRoom(created.duel_id, created.invite_code);
     } catch (e) {
       setErr(e instanceof V1ApiError ? e.message : "Could not create duel.");
+      setBusy(false);
     }
   };
 
-  const onJoin = async () => {
+  const onJoin = async (code: string) => {
     setErr(null);
-    setMsg(null);
     if (!handle) {
-      setErr("Add ?handle=your_cf_handle to the URL first.");
+      setErr("Set your Codeforces handle first.");
       return;
     }
-    if (!inviteCode.trim()) {
+    if (!code.trim()) {
       setErr("Enter an invite code.");
       return;
     }
+    setBusy(true);
     try {
-      const joined = await joinDuel(inviteCode.trim(), displayName.trim() || handle, handle);
-      setMsg(joined.already_member ? "Already in this duel." : "Joined duel.");
-      setInviteCode("");
-      await loadList();
-      await loadDuel(joined.duel_id);
+      const joined = await joinDuel(code.trim(), displayName.trim() || handle, handle);
+      goToRoom(joined.duel_id);
     } catch (e) {
       const message = e instanceof V1ApiError ? e.message : "Could not join.";
       setErr(message.toLowerCase().includes("invite") ? "Invite code is invalid or expired." : message);
+      setBusy(false);
     }
   };
-
-  const onStart = async () => {
-    if (!selected || !handle) return;
-    setErr(null);
-    try {
-      const detail = await startDuel(selected.duel_id, handle);
-      setSelected(detail);
-      setMsg("Duel started — first accepted solution wins.");
-      await loadList();
-    } catch (e) {
-      setErr(e instanceof V1ApiError ? e.message : "Could not start duel.");
-    }
-  };
-
-  const onSubmit = async () => {
-    if (!selected || !handle) return;
-    setSubmitting(true);
-    setErr(null);
-    try {
-      const res = await submitDuel(
-        selected.duel_id,
-        {
-          language,
-          source_code: source,
-          stdin,
-          expected_output: expected || null,
-        },
-        handle
-      );
-      setSelected(res.duel);
-      setMsg(
-        res.passed
-          ? res.duel.status === "completed"
-            ? "Accepted — duel completed!"
-            : "Accepted!"
-          : `Not accepted (${res.judge_status}).`
-      );
-      await loadList();
-    } catch (e) {
-      setErr(e instanceof V1ApiError ? e.message : "Submit failed.");
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const arenaHref = useMemo(() => {
-    if (!selected?.problem) return "/arena";
-    const params = new URLSearchParams();
-    if (handle) params.set("handle", handle);
-    params.set("duel", selected.duel_id);
-    if (selected.problem.problem_id) params.set("problem", selected.problem.problem_id);
-    return `/arena?${params.toString()}`;
-  }, [selected, handle]);
 
   return (
     <div style={{ minHeight: "100vh", background: "#020806", color: COLORS.text, padding: "24px 16px 48px" }}>
@@ -256,10 +236,67 @@ function DuelsContent() {
           </Link>
         </div>
 
-        {!handle && (
-          <p style={{ ...cardStyle(), fontSize: "13px", color: COLORS.amber, marginBottom: "14px" }}>
-            Open with a Codeforces handle, e.g. <code>/duels?handle=dan1c</code>
+        {/* Handle */}
+        {!handle ? (
+          <div style={{ ...cardStyle(), marginBottom: "14px" }}>
+            <div style={{ fontSize: "11px", fontWeight: 700, color: COLORS.amber, marginBottom: "8px", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+              Who are you?
+            </div>
+            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+              <input
+                style={{ ...inputStyle(), flex: "1 1 180px" }}
+                value={handleInput}
+                onChange={(e) => setHandleInput(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && applyHandle()}
+                placeholder="Your Codeforces handle, e.g. dan1c"
+              />
+              <button type="button" style={btn(true)} onClick={applyHandle}>
+                Continue
+              </button>
+            </div>
+          </div>
+        ) : (
+          <p style={{ fontSize: "12px", color: COLORS.muted, marginTop: 0 }}>
+            Playing as <strong style={{ color: COLORS.text }}>{handle}</strong>{" "}
+            <Link href="/duels" style={{ color: COLORS.cyan, fontSize: "11px" }}>
+              (change)
+            </Link>
           </p>
+        )}
+
+        {/* Invite preview (from a shared link) */}
+        {inviteParam && (
+          <div style={{ ...cardStyle(), marginBottom: "14px", borderColor: "rgba(0,245,160,0.4)" }}>
+            <div style={{ fontSize: "11px", fontWeight: 700, color: COLORS.mint, marginBottom: "8px", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+              You&apos;ve been challenged!
+            </div>
+            {preview ? (
+              <>
+                <div style={{ fontSize: "15px", fontWeight: 700 }}>
+                  {preview.creator_display_name} invites you to a duel
+                </div>
+                <div style={{ fontSize: "12px", color: COLORS.muted, marginTop: "6px" }}>
+                  {modeLabel(preview.mode)}
+                  {preview.problem?.rating != null && ` · problem rated ${preview.problem.rating}`}
+                  {preview.problem?.tags?.length ? ` · ${preview.problem.tags.slice(0, 3).join(", ")}` : ""}
+                </div>
+                <div style={{ marginTop: "12px" }}>
+                  <button type="button" style={btn(true)} onClick={() => onJoin(inviteParam)} disabled={busy || !handle}>
+                    {busy ? "Joining…" : "Accept & join duel"}
+                  </button>
+                  {!handle && (
+                    <span style={{ fontSize: "11px", color: COLORS.amber, marginLeft: "10px" }}>
+                      Set your handle above first.
+                    </span>
+                  )}
+                </div>
+              </>
+            ) : previewError ? (
+              <p style={{ fontSize: "13px", color: COLORS.red, margin: 0 }}>{previewError}</p>
+            ) : (
+              <p style={{ fontSize: "13px", color: COLORS.muted, margin: 0 }}>Loading invite…</p>
+            )}
+          </div>
         )}
 
         <div style={{ display: "grid", gap: "12px", marginBottom: "16px" }}>
@@ -278,15 +315,14 @@ function DuelsContent() {
                 <option value="rapid_10">Rapid — 10 minutes</option>
                 <option value="classic_30">Classic — 30 minutes</option>
               </select>
-              <button type="button" style={btn(true)} onClick={onCreate} disabled={!handle}>
-                Create duel
+              <button type="button" style={btn(true)} onClick={onCreate} disabled={!handle || busy}>
+                {busy ? "Creating…" : "Create duel & get invite link"}
               </button>
             </div>
-            {lastInvite && (
-              <p style={{ fontSize: "12px", color: COLORS.cyan, marginTop: "10px", marginBottom: 0, wordBreak: "break-all" }}>
-                Invite code: <strong>{lastInvite}</strong>
-              </p>
-            )}
+            <p style={{ fontSize: "11px", color: COLORS.muted, margin: "10px 0 0" }}>
+              You&apos;ll get an invite link for a friend. Same problem for both — first accepted wins;
+              fewer hints breaks ties.
+            </p>
           </div>
 
           <div style={cardStyle()}>
@@ -300,14 +336,13 @@ function DuelsContent() {
                 onChange={(e) => setInviteCode(e.target.value)}
                 placeholder="Invite code"
               />
-              <button type="button" style={btn(false)} onClick={onJoin} disabled={!handle}>
+              <button type="button" style={btn(false)} onClick={() => onJoin(inviteCode)} disabled={!handle || busy}>
                 Join
               </button>
             </div>
           </div>
         </div>
 
-        {msg && <p style={{ fontSize: "12px", color: COLORS.mint, marginTop: 0 }}>{msg}</p>}
         {err && <p style={{ fontSize: "12px", color: COLORS.red, marginTop: 0 }}>{err}</p>}
 
         {list.length > 0 && (
@@ -316,13 +351,13 @@ function DuelsContent() {
               Your duels
             </div>
             <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: "6px" }}>
-              {list.slice(0, 8).map((d) => (
+              {list.slice(0, 10).map((d) => (
                 <li key={d.duel_id}>
                   <button
                     type="button"
-                    onClick={() => loadDuel(d.duel_id)}
+                    onClick={() => goToRoom(d.duel_id)}
                     style={{
-                      ...btn(selected?.duel_id === d.duel_id),
+                      ...btn(d.status === "active" || d.status === "waiting"),
                       width: "100%",
                       textAlign: "left",
                       display: "flex",
@@ -331,120 +366,16 @@ function DuelsContent() {
                     }}
                   >
                     <span>
-                      {d.mode} · {d.problem_id}
+                      {modeLabel(d.mode)} · {d.problem_id}
+                      {d.problem_rating != null ? ` (${d.problem_rating})` : ""}
                     </span>
-                    <span style={{ color: COLORS.muted }}>{statusLabel(d.status)}</span>
+                    <span style={{ color: d.status === "active" ? COLORS.mint : COLORS.muted }}>
+                      {statusLabel(d.status)}
+                    </span>
                   </button>
                 </li>
               ))}
             </ul>
-          </div>
-        )}
-
-        {loading && <p style={{ fontSize: "13px", color: COLORS.muted }}>Loading duel…</p>}
-
-        {selected && (
-          <div style={cardStyle()}>
-            <div style={{ display: "flex", justifyContent: "space-between", gap: "8px", flexWrap: "wrap", marginBottom: "12px" }}>
-              <div>
-                <div style={{ fontSize: "14px", fontWeight: 700 }}>{statusLabel(selected.status)}</div>
-                <div style={{ fontSize: "12px", color: COLORS.muted }}>
-                  {selected.mode} · expires {selected.expires_at.slice(0, 16).replace("T", " ")} UTC
-                </div>
-              </div>
-              {selected.status === "waiting" && selected.participants.length >= 2 && (
-                <button type="button" style={btn(true)} onClick={onStart}>
-                  Start duel
-                </button>
-              )}
-            </div>
-
-            <div style={{ marginBottom: "12px", padding: "10px", borderRadius: "8px", background: "rgba(0,217,245,0.06)", border: `1px solid rgba(0,217,245,0.2)` }}>
-              <div style={{ fontSize: "13px", fontWeight: 700 }}>{selected.problem.name}</div>
-              <div style={{ fontSize: "12px", color: COLORS.muted, marginTop: "4px" }}>
-                {selected.problem.problem_id}
-                {selected.problem.rating != null && ` · ${selected.problem.rating}`}
-              </div>
-              <div style={{ display: "flex", gap: "10px", marginTop: "8px", flexWrap: "wrap" }}>
-                {selected.problem.url && (
-                  <a href={selected.problem.url} target="_blank" rel="noreferrer" style={{ fontSize: "12px", color: COLORS.cyan }}>
-                    Open on Codeforces ↗
-                  </a>
-                )}
-                <Link href={arenaHref} style={{ fontSize: "12px", color: COLORS.mint }}>
-                  Open in Arena
-                </Link>
-              </div>
-            </div>
-
-            <div style={{ marginBottom: "12px" }}>
-              <div style={{ fontSize: "11px", fontWeight: 700, color: COLORS.muted, marginBottom: "6px", textTransform: "uppercase" }}>
-                Players
-              </div>
-              {selected.participants.map((p) => (
-                <div
-                  key={`${p.role}-${p.display_name}`}
-                  style={{
-                    fontSize: "12px",
-                    display: "flex",
-                    justifyContent: "space-between",
-                    padding: "6px 0",
-                    borderTop: `1px solid ${COLORS.border}`,
-                    color: p.is_winner ? COLORS.mint : COLORS.text,
-                  }}
-                >
-                  <span>
-                    {p.display_name}
-                    {p.handle ? ` (@${p.handle})` : ""}
-                    {p.is_viewer ? " · you" : ""}
-                    {p.is_winner ? " · winner" : ""}
-                  </span>
-                  <span style={{ color: COLORS.muted }}>
-                    {p.final_status}
-                    {p.submission_count ? ` · ${p.submission_count} sub` : ""}
-                  </span>
-                </div>
-              ))}
-              {selected.status === "waiting" && selected.participants.length < 2 && (
-                <p style={{ fontSize: "12px", color: COLORS.amber, margin: "8px 0 0" }}>Waiting for opponent…</p>
-              )}
-              {selected.status === "completed" && selected.result_reason && (
-                <p style={{ fontSize: "12px", color: COLORS.mint, margin: "8px 0 0" }}>
-                  Result: {selected.result_reason.replace(/_/g, " ")}
-                </p>
-              )}
-              {selected.status === "expired" && (
-                <p style={{ fontSize: "12px", color: COLORS.muted, margin: "8px 0 0" }}>Time expired — draw.</p>
-              )}
-            </div>
-
-            {selected.status === "active" && (
-              <div>
-                <div style={{ fontSize: "11px", fontWeight: 700, color: COLORS.muted, marginBottom: "8px", textTransform: "uppercase" }}>
-                  Submit solution
-                </div>
-                <p style={{ fontSize: "11px", color: COLORS.muted, marginTop: 0 }}>
-                  Uses Judge0 sample judging (stdin + expected output), same as Arena. First accepted wins.
-                </p>
-                <div style={{ display: "grid", gap: "8px" }}>
-                  <select style={inputStyle()} value={language} onChange={(e) => setLanguage(e.target.value as "python3" | "cpp17")}>
-                    <option value="python3">Python 3</option>
-                    <option value="cpp17">C++17</option>
-                  </select>
-                  <textarea
-                    style={{ ...inputStyle(), minHeight: "120px", fontFamily: "ui-monospace, monospace", fontSize: "12px" }}
-                    value={source}
-                    onChange={(e) => setSource(e.target.value)}
-                    spellCheck={false}
-                  />
-                  <input style={inputStyle()} value={stdin} onChange={(e) => setStdin(e.target.value)} placeholder="stdin (optional)" />
-                  <input style={inputStyle()} value={expected} onChange={(e) => setExpected(e.target.value)} placeholder="expected output (optional)" />
-                  <button type="button" style={btn(true)} onClick={onSubmit} disabled={submitting}>
-                    {submitting ? "Judging…" : "Submit"}
-                  </button>
-                </div>
-              </div>
-            )}
           </div>
         )}
       </div>

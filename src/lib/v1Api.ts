@@ -183,6 +183,62 @@ export interface SyncResponse {
   reused?: boolean;
 }
 
+// ─── Gamification (Phase G1) ─────────────────────────────────────────────────
+//
+// Lightweight retention layer (XP, levels, streak, daily goal, badges) derived
+// server-side from real training actions only — no leaderboard, no duels, no
+// social comparison, no payment/admin data ever appears here.
+
+export interface GamificationLevelProgress {
+  current_level_xp: number;
+  next_level_xp: number;
+  progress_percent: number;
+}
+
+export interface GamificationStreak {
+  current: number;
+  longest: number;
+  last_active_date: string | null;
+  today_completed: boolean;
+}
+
+export interface GamificationDailyGoalItem {
+  id: string;
+  label: string;
+  completed: boolean;
+}
+
+export interface GamificationDailyGoal {
+  date: string;
+  completed: boolean;
+  completed_count: number;
+  required_count: number;
+  items: GamificationDailyGoalItem[];
+}
+
+export interface GamificationBadge {
+  id: string;
+  name: string;
+  description: string;
+  earned_at: string;
+}
+
+export interface GamificationSnapshot {
+  subject: string;
+  plan: string;
+  xp_total: number;
+  level: number;
+  level_progress: GamificationLevelProgress;
+  streak: GamificationStreak;
+  daily_goal: GamificationDailyGoal;
+  badges: GamificationBadge[];
+}
+
+export function getGamification(handle?: string): Promise<GamificationSnapshot> {
+  const query = handle ? `?handle=${encodeURIComponent(handle)}` : "";
+  return v1Fetch<GamificationSnapshot>(`/api/v1/gamification/me${query}`);
+}
+
 // ─── Endpoints ────────────────────────────────────────────────────────────────
 
 export function getMyEntitlements(): Promise<EntitlementsResponse> {

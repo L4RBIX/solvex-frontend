@@ -50,4 +50,7 @@ next-env.d.ts
 # Local temp files
 temp/
 
+# Local Playwright CLI test artifacts
+.playwright-cli/
+
 .claude/

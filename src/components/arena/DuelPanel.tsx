@@ -16,13 +16,16 @@ const AMBER = "#FFAA33";
 const RED = "#FF4D6D";
 const MUTED = "#8A9A96";
 
+// "Accepted" is reserved for authoritative (official Codeforces) judging,
+// which SolveX never has for CF catalog problems — always say "Custom tests
+// passed" here instead, per the honest-verdict policy.
 function opponentStatusLabel(p: DuelParticipantState, duelStatus: string): { text: string; color: string } {
   if (p.is_winner) return { text: "Won", color: MINT };
   if (duelStatus === "completed" || duelStatus === "expired") {
-    if (p.accepted) return { text: "Accepted", color: MINT };
+    if (p.accepted) return { text: "Custom tests passed", color: MINT };
     return { text: duelStatus === "expired" ? "Draw" : "Lost", color: MUTED };
   }
-  if (p.accepted) return { text: "Accepted ✓", color: MINT };
+  if (p.accepted) return { text: "Custom tests passed ✓", color: MINT };
   if (p.judging) return { text: "Judging…", color: CYAN };
   if (p.wrong_attempts > 0) return { text: `Failed attempt ×${p.wrong_attempts}`, color: AMBER };
   if (p.arena_opened) return { text: "Coding", color: CYAN };
@@ -92,6 +95,21 @@ export function DuelStatusBar({ state, hints, onUseHint, hintLoading, hintError 
       <span style={{ display: "flex", alignItems: "center", gap: "6px", color: CYAN, fontWeight: 700 }}>
         <Swords size={13} />
         Duel · {state.mode === "classic_30" ? "Classic 30" : "Rapid 10"}
+      </span>
+
+      <span
+        title={state.judging_note}
+        style={{
+          padding: "2px 8px",
+          borderRadius: "10px",
+          fontSize: "10px",
+          fontWeight: 700,
+          color: AMBER,
+          background: "rgba(255,170,51,0.08)",
+          border: `1px solid rgba(255,170,51,0.3)`,
+        }}
+      >
+        Practice judging — not official Codeforces tests
       </span>
 
       {running && !clockReady ? (
@@ -247,15 +265,18 @@ export function DuelResultOverlay({ state, handle, onDismiss }: DuelResultOverla
   const me = state.participants.find((p) => p.is_viewer);
   const opponent = state.participants.find((p) => !p.is_viewer);
 
-  const heading = result.viewer_won ? "You won!" : result.is_draw ? "Draw" : "You lost";
+  // Practice-duel copy: judging is a shared custom test, not official
+  // Codeforces verification — never imply the loser's solution is wrong
+  // unless a verified failing test says so.
+  const heading = result.viewer_won ? "You won the practice duel" : result.is_draw ? "Draw" : "You lost";
   const headingColor = result.viewer_won ? MINT : result.is_draw ? MUTED : RED;
   const sub = result.viewer_won
-    ? "First to a clean accepted solution. Well played!"
+    ? "First to pass the shared custom tests. Well played!"
     : result.is_draw
-      ? "Neither side got accepted in time — rematch?"
+      ? "Neither side passed the shared test in time — rematch?"
       : result.result_reason === "fewer_hints"
-        ? `${result.winner_display_name ?? "Opponent"} solved it with fewer hints.`
-        : `${result.winner_display_name ?? "Opponent"} got accepted first.`;
+        ? `${result.winner_display_name ?? "Opponent"} passed the shared tests with fewer hints.`
+        : `Opponent passed the shared tests first.`;
 
   const statRow = (label: string, a: string | number, b: string | number) => (
     <div style={{ display: "flex", justifyContent: "space-between", gap: "12px", fontSize: "12px", padding: "5px 0", borderTop: "1px solid #12271E" }}>

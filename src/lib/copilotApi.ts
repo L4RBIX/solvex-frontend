@@ -6,6 +6,18 @@ const COPILOT_URL = `${API_BASE}/api/copilot`;
 
 // ─── Shared message type (exported so ArenaLayout can lift this state) ───────
 
+// Evidence classification for a Copilot correctness claim — see backend
+// contestiq_api/routes/copilot.py EVIDENCE_* constants. Anything other than
+// verified_test_failure/verified_counterexample/compile_error/runtime_error
+// means no real execution backs the claim.
+export type CopilotEvidenceType =
+  | "compile_error"
+  | "runtime_error"
+  | "verified_test_failure"
+  | "verified_counterexample"
+  | "speculative_review"
+  | "no_verified_failure";
+
 export interface CopilotMessage {
   id: string;
   role: "user" | "assistant";
@@ -13,6 +25,8 @@ export interface CopilotMessage {
   ts: number;
   mode?: CopilotMode;
   suggestedNextAction?: string;
+  evidenceType?: CopilotEvidenceType;
+  verifiedWrong?: boolean;
 }
 
 // ─── Mode types ───────────────────────────────────────────────────────────────
@@ -86,6 +100,8 @@ export interface CopilotResult {
   model: string;
   suggested_next_action?: string;
   detected_issue_type?: string;
+  evidence_type?: CopilotEvidenceType;
+  verified_wrong?: boolean;
   error?: string;
 }
 

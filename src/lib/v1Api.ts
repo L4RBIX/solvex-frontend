@@ -390,11 +390,25 @@ export interface DuelProblem {
   url?: string | null;
 }
 
+// Honest per-submission/per-participant verdict — never implies official
+// Codeforces correctness (the catalog stores no official tests). See backend
+// contestiq_api/duels.py VERDICT_* constants.
+export type DuelVerdict =
+  | "no_tests"
+  | "compile_error"
+  | "runtime_error"
+  | "custom_tests_passed"
+  | "custom_tests_failed"
+  | "official_accepted";
+
+export type DuelJudgingMode = "authoritative" | "custom_tests";
+
 export interface DuelParticipant {
   display_name: string;
   handle: string | null;
   role: string;
   final_status: string;
+  verdict?: DuelVerdict;
   accepted_at: string | null;
   joined_at: string;
   submission_count: number;
@@ -414,6 +428,8 @@ export interface DuelDetail {
   completed_at: string | null;
   winner_subject: string | null;
   result_reason: string | null;
+  judging_mode?: DuelJudgingMode;
+  test_locked?: boolean;
   viewer_subject?: string | null;
   viewer_role?: string | null;
   participants: DuelParticipant[];
@@ -526,7 +542,13 @@ export interface DuelParticipantState {
   accepted_at: string | null;
   seconds_to_accept: number | null;
   final_status: string;
+  verdict: DuelVerdict;
   is_winner: boolean;
+}
+
+export interface DuelSharedTest {
+  input: string;
+  expected_output: string;
 }
 
 export interface DuelResultState {
@@ -551,8 +573,10 @@ export interface DuelState {
   arena_path: string;
   duration_minutes: number;
   hints_max: number;
-  judging_mode: string;
+  judging_mode: DuelJudgingMode;
   judging_note: string;
+  test_locked: boolean;
+  shared_test: DuelSharedTest | null;
   problem: DuelProblem;
   skill_id?: string | null;
   participants: DuelParticipantState[];
@@ -612,6 +636,8 @@ export function submitDuel(
 ): Promise<{
   submission_id: string;
   judge_status: string;
+  verdict?: DuelVerdict;
+  judging_mode?: DuelJudgingMode;
   passed: boolean;
   runtime_ms: number | null;
   memory_kb: number | null;

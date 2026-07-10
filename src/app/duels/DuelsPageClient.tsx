@@ -320,8 +320,9 @@ function DuelsContent() {
               </button>
             </div>
             <p style={{ fontSize: "11px", color: COLORS.muted, margin: "10px 0 0" }}>
-              You&apos;ll get an invite link for a friend. Same problem for both — first accepted wins;
-              fewer hints breaks ties.
+              You&apos;ll get an invite link for a friend. Same problem for both, judged against one shared
+              custom test — first to pass wins; fewer hints breaks ties. Practice judging, not official
+              Codeforces verification.
             </p>
           </div>
 

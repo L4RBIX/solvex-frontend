@@ -341,8 +341,9 @@ function DuelRoomContent({ duelId }: { duelId: string }) {
             {actionError && <p style={{ fontSize: "12px", color: COLORS.red }}>{actionError}</p>}
 
             <p style={{ fontSize: "11px", color: COLORS.muted }}>
-              Hints help, but fewer hints wins ties. First accepted solution wins — if both accept,
-              fewer hints, then earlier accept, then fewer wrong attempts decide.
+              Practice judging — you&apos;re scored against one shared custom test, not official Codeforces
+              tests. Hints help, but fewer hints wins ties. First to pass the shared test wins — if both
+              pass, fewer hints, then earlier pass, then fewer wrong attempts decide.
             </p>
           </>
         )}

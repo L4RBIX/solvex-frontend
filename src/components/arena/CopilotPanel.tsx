@@ -156,6 +156,27 @@ function isErrorStatus(status: string): boolean {
   );
 }
 
+// ─── Evidence badge ───────────────────────────────────────────────────────────
+//
+// Shows whether a Copilot claim is backed by real execution or is unverified
+// model reasoning — see CopilotEvidenceType. Fixes a production bug where
+// Copilot stated a correct solution was wrong with a fabricated, unexecuted
+// counterexample.
+
+function evidenceBadge(evidenceType?: string): { label: string; color: string; bg: string; border: string } | null {
+  switch (evidenceType) {
+    case "compile_error":
+    case "runtime_error":
+    case "verified_test_failure":
+    case "verified_counterexample":
+      return { label: "Execution verified", color: "#00F5A0", bg: "rgba(0,245,160,0.08)", border: "rgba(0,245,160,0.25)" };
+    case "speculative_review":
+      return { label: "Unverified — code review only", color: "#FFAA33", bg: "rgba(255,170,51,0.08)", border: "rgba(255,170,51,0.3)" };
+    default:
+      return null;
+  }
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function CopilotPanel({
@@ -314,6 +335,8 @@ export default function CopilotPanel({
           content: result.message,
           ts: Date.now(),
           suggestedNextAction: result.suggested_next_action ?? undefined,
+          evidenceType: result.evidence_type,
+          verifiedWrong: result.verified_wrong,
         },
       ]);
     },
@@ -608,6 +631,18 @@ export default function CopilotPanel({
                   : <span style={{ fontSize: "9px", color: "#8A9A96" }}>U</span>}
               </div>
               <div style={{ maxWidth: "82%", display: "flex", flexDirection: "column", gap: "3px" }}>
+                {msg.role === "assistant" && evidenceBadge(msg.evidenceType) && (
+                  <span style={{
+                    alignSelf: "flex-start",
+                    display: "inline-flex", alignItems: "center", gap: "4px",
+                    padding: "2px 7px", borderRadius: "10px", fontSize: "9.5px", fontWeight: 700,
+                    background: evidenceBadge(msg.evidenceType)!.bg,
+                    border: `1px solid ${evidenceBadge(msg.evidenceType)!.border}`,
+                    color: evidenceBadge(msg.evidenceType)!.color,
+                  }}>
+                    {evidenceBadge(msg.evidenceType)!.label}
+                  </span>
+                )}
                 <div style={{
                   padding: "7px 10px",
                   borderRadius: msg.role === "user" ? "10px 4px 10px 10px" : "4px 10px 10px 10px",

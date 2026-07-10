@@ -123,7 +123,9 @@ export default function ArenaLayout() {
             sample_tests: [],
             notes:
               "Add a test case (input + expected output from the statement's samples), write your solution, " +
-              "and Submit. First accepted wins — if both accept, fewer hints, then earlier accept, then fewer wrong attempts.",
+              "and Submit. Whoever submits first locks that test as the shared one both players are judged " +
+              "against. First to pass the shared custom test wins — if both pass, fewer hints, then earlier pass, " +
+              "then fewer wrong attempts.",
             is_sample: false,
           }
         : null,
@@ -153,6 +155,7 @@ export default function ArenaLayout() {
   const [hintError, setHintError] = useState<string | null>(null);
   const [resultDismissed, setResultDismissed] = useState(false);
   const duelKeyRef = useRef<string | null>(null);
+  const sharedTestPrefilledRef = useRef(false);
 
   const codeRef = useRef(code);
   const prevCodeRef = useRef(code);
@@ -242,6 +245,7 @@ export default function ArenaLayout() {
   useEffect(() => {
     if (!duelProblem || duelKeyRef.current === duelProblem.key) return;
     duelKeyRef.current = duelProblem.key;
+    sharedTestPrefilledRef.current = false;
     setTestCases([
       {
         id: makeId(),
@@ -253,6 +257,28 @@ export default function ArenaLayout() {
       },
     ]);
   }, [duelProblem]);
+
+  // Duel mode: once the shared test is locked (server-controlled — see
+  // duels.py _lock_shared_test), prefill it once so the second player codes
+  // against the SAME input/expected output they'll actually be judged on,
+  // instead of typing a different one that gets silently overridden.
+  useEffect(() => {
+    if (!duelState?.shared_test || sharedTestPrefilledRef.current) return;
+    sharedTestPrefilledRef.current = true;
+    const shared = duelState.shared_test;
+    setTestCases((prev) =>
+      prev.length > 0
+        ? prev.map((t, i) => (i === 0 ? { ...t, input: shared.input, expected_output: shared.expected_output } : t))
+        : [{
+            id: makeId(),
+            input: shared.input,
+            expected_output: shared.expected_output,
+            status: "not_run",
+            is_sample: false,
+            label: "Shared duel test",
+          }]
+    );
+  }, [duelState?.shared_test]);
 
   function handleLanguageChange(lang: ExecutionLanguage) {
     setLanguage(lang);
@@ -367,8 +393,8 @@ export default function ArenaLayout() {
         passed: res.passed,
         message: res.passed
           ? res.duel.status === "completed"
-            ? "Accepted — duel decided!"
-            : "Accepted! Waiting for the final verdict…"
+            ? "Custom tests passed — duel decided!"
+            : "Custom tests passed! Waiting for the final verdict…"
           : res.message || res.judge_status,
       });
       addEvent("result_received", { status, is_mock: false });

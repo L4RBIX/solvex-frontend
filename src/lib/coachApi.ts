@@ -1,4 +1,5 @@
 import { API_BASE } from "@/lib/apiBase";
+import { getApiToken } from "@/lib/v1Api";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -42,7 +43,11 @@ export function getOrCreateAnonKey(): string {
 export async function getCoachProfile(anonKey: string): Promise<CoachProfile | null> {
   try {
     const url = `${API_BASE}/api/copilot/profile?anonymous_user_key=${encodeURIComponent(anonKey)}`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+    const token = getApiToken();
+    const res = await fetch(url, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      signal: AbortSignal.timeout(10_000),
+    });
     if (!res.ok) return null;
     const body = (await res.json()) as { status: string; profile: CoachProfile | null };
     return body.profile ?? null;
@@ -53,9 +58,13 @@ export async function getCoachProfile(anonKey: string): Promise<CoachProfile | n
 
 export async function updateCoachProfile(anonKey: string): Promise<CoachProfile | null> {
   try {
+    const token = getApiToken();
     const res = await fetch(`${API_BASE}/api/copilot/profile/update`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
       body: JSON.stringify({ anonymous_user_key: anonKey }),
       signal: AbortSignal.timeout(20_000),
     });

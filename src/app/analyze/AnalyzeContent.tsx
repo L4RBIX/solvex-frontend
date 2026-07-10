@@ -7,6 +7,7 @@ import type { AnalysisResult, FrictionArea, QueueDay } from "@/lib/cfAnalysis";
 import { V1ApiError, fetchLegacyAnalysis } from "@/lib/v1Api";
 import { V1TrainingPanel } from "@/components/analyze/V1TrainingPanel";
 import { GamificationWidget } from "@/components/analyze/GamificationWidget";
+import { PrivateLeaderboardSection } from "@/components/analyze/PrivateLeaderboardSection";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -644,31 +645,42 @@ function RecommendedProblems({ data }: { data: AnalysisResult }) {
     >
       {data.recommendedProblems.map((p, i) => {
         const link = cfProblemLink(p.contestId, p.index);
-        const Wrapper = link ? "a" : "div";
-        const wrapperProps = link
-          ? { href: link, target: "_blank", rel: "noopener noreferrer", style: { textDecoration: "none" } }
-          : {};
 
         return (
-          <Wrapper key={i} {...wrapperProps}>
+          <div key={i}>
             <div
               className="tx-card"
               style={{
                 padding: "14px 16px",
                 display: "flex", alignItems: "center", justifyContent: "space-between",
-                gap: "12px", cursor: link ? "pointer" : "default",
+                gap: "12px",
               }}
             >
               <div style={{ minWidth: 0 }}>
-                <div
-                  style={{
-                    fontSize: "13px", fontWeight: 600, color: "#F4F7F6",
-                    letterSpacing: "-0.01em", marginBottom: "3px",
-                    whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-                  }}
-                >
-                  {p.name}
-                </div>
+                {link ? (
+                  <a
+                    href={link}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{
+                      display: "block", fontSize: "13px", fontWeight: 600, color: "#F4F7F6",
+                      letterSpacing: "-0.01em", marginBottom: "3px", textDecoration: "none",
+                      whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                    }}
+                  >
+                    {p.name}
+                  </a>
+                ) : (
+                  <div
+                    style={{
+                      fontSize: "13px", fontWeight: 600, color: "#F4F7F6",
+                      letterSpacing: "-0.01em", marginBottom: "3px",
+                      whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                    }}
+                  >
+                    {p.name}
+                  </div>
+                )}
                 <div style={{ fontSize: "11px", color: "#8A9A96", lineHeight: "16px" }}>
                   {p.reason}
                 </div>
@@ -701,7 +713,7 @@ function RecommendedProblems({ data }: { data: AnalysisResult }) {
                 )}
               </div>
             </div>
-          </Wrapper>
+          </div>
         );
       })}
     </div>
@@ -873,6 +885,7 @@ function Dashboard({ data }: { data: AnalysisResult }) {
       {/* v1 training engine (weakness map, daily queue, plans, weekly report) */}
       <div className="tx-rise tx-rise-6">
         <GamificationWidget handle={data.handle} />
+        <PrivateLeaderboardSection handle={data.handle} />
         <V1TrainingPanel handle={data.handle} />
       </div>
 

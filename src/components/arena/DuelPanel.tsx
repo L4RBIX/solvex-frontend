@@ -255,11 +255,10 @@ function Confetti() {
 
 interface DuelResultOverlayProps {
   state: DuelState;
-  handle: string;
   onDismiss: () => void;
 }
 
-export function DuelResultOverlay({ state, handle, onDismiss }: DuelResultOverlayProps) {
+export function DuelResultOverlay({ state, onDismiss }: DuelResultOverlayProps) {
   const result = state.result;
   if (!result) return null;
   const me = state.participants.find((p) => p.is_viewer);
@@ -344,7 +343,7 @@ export function DuelResultOverlay({ state, handle, onDismiss }: DuelResultOverla
 
         <div style={{ display: "flex", gap: "10px", justifyContent: "center", marginTop: "20px", flexWrap: "wrap" }}>
           <Link
-            href={handle ? `/duels?handle=${encodeURIComponent(handle)}` : "/duels"}
+            href="/duels"
             style={{
               padding: "9px 16px",
               borderRadius: "8px",

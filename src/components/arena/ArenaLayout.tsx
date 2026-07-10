@@ -15,6 +15,8 @@ import type { CopilotMessage } from "@/lib/copilotApi";
 import type { DuelHintResponse } from "@/lib/v1Api";
 import { V1ApiError, openDuelArena, requestDuelHint, submitDuel } from "@/lib/v1Api";
 import { useDuelState } from "@/hooks/useDuelState";
+import { useAuth } from "@/hooks/useAuth";
+import SignInGate from "@/components/auth/SignInGate";
 import type { ExecutionLanguage, ExecutionResult, ExecutionStatus } from "@/types/execution";
 import { JUDGE0_LANGUAGE_MAP } from "@/types/execution";
 import type { ArenaProblem, ArenaEvent, ArenaEventType, CodeSnapshot, TestCase } from "@/types/arena";
@@ -100,7 +102,13 @@ export default function ArenaLayout() {
   const duelParam = searchParams.get("duel");
 
   // Duel mode (Phase G4.1): poll shared state every 2s; never breaks normal Arena.
-  const duel = useDuelState(duelParam, handleParam, 2000);
+  const duelAuth = useAuth();
+  const duelSignedIn = duelAuth.status === "signed_in";
+  const duel = useDuelState(
+    duelParam && duelSignedIn ? duelParam : null,
+    2000,
+    duelSignedIn ? duelAuth.user?.user_id ?? null : null
+  );
   const duelState = duel.state;
 
   const duelProblemData = duelState?.problem ?? null;
@@ -237,8 +245,8 @@ export default function ArenaLayout() {
 
   // Duel mode: arena-open telemetry (fire and forget — never blocks the Arena).
   useEffect(() => {
-    if (duelParam) void openDuelArena(duelParam, handleParam).catch(() => {});
-  }, [duelParam, handleParam]);
+    if (duelParam && duelSignedIn) void openDuelArena(duelParam).catch(() => {});
+  }, [duelParam, duelSignedIn]);
 
   // Duel mode: when the duel problem loads, start from one empty custom test —
   // the player copies a sample from the official statement.
@@ -352,7 +360,7 @@ export default function ArenaLayout() {
   }
 
   async function handleDuelSubmit() {
-    if (!duelParam) return;
+    if (!duelParam || !duelSignedIn) return;
     const tc = testCases.find((t) => t.expected_output.trim());
     if (!tc) {
       setResult({
@@ -372,16 +380,12 @@ export default function ArenaLayout() {
     persistSnapshot("submit");
     setRightTab("console");
     try {
-      const res = await submitDuel(
-        duelParam,
-        {
-          language,
-          source_code: codeRef.current,
-          stdin: tc.input,
-          expected_output: tc.expected_output,
-        },
-        handleParam
-      );
+      const res = await submitDuel(duelParam, {
+        language,
+        source_code: codeRef.current,
+        stdin: tc.input,
+        expected_output: tc.expected_output,
+      });
       const status = toExecutionStatus(res.judge_status);
       setResult({
         status,
@@ -415,7 +419,7 @@ export default function ArenaLayout() {
   }
 
   async function handleSubmit() {
-    if (duelParam) {
+    if (duelParam && duelSignedIn) {
       await handleDuelSubmit();
       return;
     }
@@ -442,7 +446,7 @@ export default function ArenaLayout() {
     setHintLoading(true);
     setHintError(null);
     try {
-      const hint = await requestDuelHint(duelParam, handleParam);
+      const hint = await requestDuelHint(duelParam);
       setDuelHints((prev) =>
         prev.some((h) => h.hint_number === hint.hint_number) ? prev : [...prev, hint]
       );
@@ -509,7 +513,7 @@ export default function ArenaLayout() {
       />
 
       {/* Duel mode: live status strip (never rendered on normal /arena) */}
-      {duelParam && duelState && (
+      {duelParam && duelSignedIn && duelState && !duel.fatalError && (
         <DuelStatusBar
           state={duelState}
           hints={duelHints}
@@ -518,7 +522,18 @@ export default function ArenaLayout() {
           hintError={hintError}
         />
       )}
-      {duelParam && duel.fatalError && (
+      {duelParam && duelAuth.status === "signed_out" && (
+        <div style={{ padding: "16px", flexShrink: 0, borderBottom: "1px solid rgba(255,170,51,0.25)", background: "rgba(255,170,51,0.06)" }}>
+          <SignInGate
+            onSignIn={() => void duelAuth.signIn()}
+            busy={duelAuth.busy}
+            error={duelAuth.error}
+            title="Sign in to enter this duel"
+            message="Sign in to compete; handle verification is optional. The Arena below still works for normal practice while signed out."
+          />
+        </div>
+      )}
+      {duelParam && duelSignedIn && duel.fatalError && (
         <div
           style={{
             padding: "8px 16px",
@@ -680,12 +695,8 @@ export default function ArenaLayout() {
       </div>
 
       {/* Duel result: win/lose/draw overlay with animation */}
-      {duelParam && duelState?.result && !resultDismissed && (
-        <DuelResultOverlay
-          state={duelState}
-          handle={handleParam ?? ""}
-          onDismiss={() => setResultDismissed(true)}
-        />
+      {duelParam && duelSignedIn && !duel.fatalError && duelState?.result && !resultDismissed && (
+        <DuelResultOverlay state={duelState} onDismiss={() => setResultDismissed(true)} />
       )}
 
       {/* Responsive styles */}

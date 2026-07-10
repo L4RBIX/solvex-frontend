@@ -11,6 +11,8 @@ import { getOrCreateAnonKey, getCoachProfile, updateCoachProfile, STYLE_LABELS, 
 import type { CoachProfile } from "@/lib/coachApi";
 import type { ExecutionLanguage, ExecutionStatus } from "@/types/execution";
 import type { ArenaProblem, ArenaEvent } from "@/types/arena";
+import { useAuth } from "@/hooks/useAuth";
+import { getApiToken } from "@/lib/v1Api";
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
@@ -198,6 +200,8 @@ export default function CopilotPanel({
   events,
   verificationMode = false,
 }: CopilotPanelProps) {
+  const auth = useAuth();
+  const coachAccountId = auth.status === "signed_in" ? auth.user?.user_id ?? null : null;
   // Per-panel transient state (fine to reset on remount)
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -212,35 +216,46 @@ export default function CopilotPanel({
     return getOrCreateAnonKey();
   });
   const [coachExpanded, setCoachExpanded] = useState(false);
-  const [coachProfile, setCoachProfile] = useState<CoachProfile | null>(null);
+  const [coachProfileState, setCoachProfileState] = useState<{
+    accountId: string;
+    profile: CoachProfile | null;
+  } | null>(null);
+  const coachProfile = coachProfileState?.accountId === coachAccountId ? coachProfileState.profile : null;
   const [coachLoading, setCoachLoading] = useState(false);
-  const [coachLoaded, setCoachLoaded] = useState(false);
+  const [coachLoadedAccount, setCoachLoadedAccount] = useState<string | null>(null);
+  const coachLoaded = coachLoadedAccount === coachAccountId;
 
   async function loadCoachProfile() {
-    if (!anonUserKey || coachLoading) return;
+    const requestedAccount = coachAccountId;
+    const requestedToken = getApiToken();
+    if (!anonUserKey || !requestedAccount || coachLoading) return;
     setCoachLoading(true);
     const profile = await getCoachProfile(anonUserKey);
-    setCoachProfile(profile);
-    setCoachLoaded(true);
+    if (getApiToken() !== requestedToken) return;
+    setCoachProfileState({ accountId: requestedAccount, profile });
+    setCoachLoadedAccount(requestedAccount);
     setCoachLoading(false);
   }
 
   async function handleUpdateCoach() {
-    if (!anonUserKey || coachLoading) return;
+    const requestedAccount = coachAccountId;
+    const requestedToken = getApiToken();
+    if (!anonUserKey || !requestedAccount || coachLoading) return;
     setCoachLoading(true);
     const profile = await updateCoachProfile(anonUserKey);
-    setCoachProfile(profile);
-    setCoachLoaded(true);
+    if (getApiToken() !== requestedToken) return;
+    setCoachProfileState({ accountId: requestedAccount, profile });
+    setCoachLoadedAccount(requestedAccount);
     setCoachLoading(false);
   }
 
   // Load profile lazily when the card is first expanded
   useEffect(() => {
-    if (coachExpanded && !coachLoaded && anonUserKey) {
+    if (coachExpanded && !coachLoaded && anonUserKey && coachAccountId) {
       void loadCoachProfile();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [coachExpanded]);
+  }, [coachExpanded, coachAccountId]);
 
   const prevStatusRef = useRef<string>("");
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -455,10 +470,11 @@ export default function CopilotPanel({
             type="button"
             title="Update coach memory"
             onClick={(e) => { e.stopPropagation(); void handleUpdateCoach(); }}
-            disabled={coachLoading}
+            disabled={coachLoading || !coachAccountId}
             style={{
               background: "none", border: "none", padding: "2px 4px",
-              color: coachLoading ? "#2A4A5A" : "#3A7A8A", cursor: coachLoading ? "not-allowed" : "pointer",
+              color: coachLoading || !coachAccountId ? "#2A4A5A" : "#3A7A8A",
+              cursor: coachLoading || !coachAccountId ? "not-allowed" : "pointer",
               display: "flex", alignItems: "center",
             }}
           >
@@ -477,7 +493,20 @@ export default function CopilotPanel({
         {/* Expanded content */}
         {coachExpanded && (
           <div style={{ padding: "0 12px 8px" }}>
-            {coachLoading ? (
+            {!coachAccountId ? (
+              <button
+                type="button"
+                onClick={() => void auth.signIn()}
+                disabled={auth.busy}
+                style={{
+                  width: "100%", padding: "6px 8px", borderRadius: "6px",
+                  border: "1px solid rgba(0,217,245,0.2)", background: "rgba(0,217,245,0.05)",
+                  color: "#7AC8D8", fontSize: "10px", cursor: auth.busy ? "wait" : "pointer",
+                }}
+              >
+                {auth.busy ? "Signing in…" : "Sign in to use private Coach Memory"}
+              </button>
+            ) : coachLoading ? (
               <div style={{ fontSize: "10px", color: "#3A5A6A" }}>Updating profile…</div>
             ) : coachProfile ? (
               <div style={{ display: "flex", flexDirection: "column", gap: "3px" }}>

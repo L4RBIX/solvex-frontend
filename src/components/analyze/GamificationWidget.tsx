@@ -1,12 +1,18 @@
 "use client";
 
 /**
- * SolveX gamification widget (Phase G1 + G2): XP, level, streak, daily goal,
- * badges, recent activity breakdown, daily/weekly quests, and milestones.
+ * SolveX gamification widget (Phase G1 + G2, security hotfix): XP, level,
+ * streak, daily goal, badges, recent activity breakdown, daily/weekly
+ * quests, and milestones.
  *
  * This widget is intentionally isolated: it fetches and renders on its own,
  * catches its own errors, and never throws. A failed or slow gamification
  * call must never break analysis, the daily queue, plans, Arena, or Copilot.
+ *
+ * Security: XP/streak/badges are private SolveX-account data — a Codeforces
+ * handle alone no longer selects whose data to show. The widget always shows
+ * the SIGNED-IN caller's own snapshot (never the `handle` being analyzed on
+ * this page) and prompts to sign in otherwise.
  *
  * G2 fields are optional in the API response — if the backend returns a G1-only
  * shape, the widget still renders core stats and simply hides the new sections.
@@ -15,13 +21,17 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import {
   GamificationBadge,
   GamificationSnapshot,
   V1ApiError,
+  getApiToken,
   getGamification,
 } from "@/lib/v1Api";
-import { PrivateLeaderboardSection } from "@/components/analyze/PrivateLeaderboardSection";
+import { useAuth } from "@/hooks/useAuth";
+import SignInGate from "@/components/auth/SignInGate";
+import HandleClaimPanel from "@/components/auth/HandleClaimPanel";
 
 const COLORS = {
   bg: "#06100D",
@@ -339,35 +349,91 @@ function MilestonesRow({ milestones }: { milestones: NonNullable<GamificationSna
 }
 
 export function GamificationWidget({ handle }: { handle: string }) {
+  const auth = useAuth();
+  const signedIn = auth.status === "signed_in" && !!auth.user;
+  const accountId = signedIn ? auth.user!.user_id : null;
   const [status, setStatus] = useState<Status>("loading");
-  const [data, setData] = useState<GamificationSnapshot | null>(null);
+  const [snapshot, setSnapshot] = useState<{ accountId: string; data: GamificationSnapshot } | null>(null);
+  const data = snapshot?.accountId === accountId ? snapshot.data : null;
 
   const load = useCallback(async () => {
-    if (!handle) {
+    const requestedAccount = accountId;
+    const requestedToken = getApiToken();
+    if (!requestedAccount) {
       setStatus("ready");
-      setData(null);
       return;
     }
     setStatus("loading");
     try {
-      const snapshot = await getGamification(handle);
-      setData(snapshot);
+      const snapshot = await getGamification();
+      if (getApiToken() !== requestedToken) return;
+      setSnapshot({ accountId: requestedAccount, data: snapshot });
       setStatus("ready");
     } catch (err) {
+      if (getApiToken() !== requestedToken) return;
       void (err instanceof V1ApiError ? err.message : err);
-      setData(null);
+      setSnapshot(null);
       setStatus("error");
     }
-  }, [handle]);
+  }, [accountId]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
   }, [load]);
 
+  if (auth.status === "loading") {
+    return (
+      <div style={{ marginBottom: "20px" }}>
+        <style>{`
+          @keyframes gami-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+        `}</style>
+        <GamificationSkeleton />
+      </div>
+    );
+  }
+
+  if (!signedIn) {
+    return (
+      <div style={{ marginBottom: "20px" }}>
+        <SignInGate
+          onSignIn={() => void auth.signIn()}
+          busy={auth.busy}
+          error={auth.error}
+          title="Track your XP, streak, and badges"
+          message={`The analysis for ${handle || "this handle"} is public. Sign in to see your own private XP; then verify only a Codeforces handle you control.`}
+        />
+      </div>
+    );
+  }
+
+  const accountContext = (
+    <div
+      style={{
+        background: COLORS.bg,
+        border: `1px solid ${COLORS.border}`,
+        borderRadius: "12px",
+        padding: "14px 16px",
+        marginBottom: "10px",
+      }}
+    >
+      <p style={{ fontSize: "12px", color: COLORS.muted, margin: "0 0 10px", lineHeight: "17px" }}>
+        Viewing public analysis for <strong style={{ color: COLORS.text }}>{handle}</strong>. Private stats below belong to {auth.user?.handle ? (
+          <strong style={{ color: COLORS.mint }}>your verified account @{auth.user.handle}</strong>
+        ) : (
+          <strong style={{ color: COLORS.text }}>your signed-in, unverified SolveX account</strong>
+        )}.
+      </p>
+      {!auth.user?.handle_verified && auth.user && (
+        <HandleClaimPanel user={auth.user} onVerified={() => void auth.refresh()} />
+      )}
+    </div>
+  );
+
   if (status === "loading") {
     return (
       <div style={{ marginBottom: "20px" }}>
+        {accountContext}
         <style>{`
           @keyframes gami-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
         `}</style>
@@ -379,6 +445,7 @@ export function GamificationWidget({ handle }: { handle: string }) {
   if (status === "error") {
     return (
       <div style={{ marginBottom: "20px" }}>
+        {accountContext}
         <GamificationError onRetry={load} />
       </div>
     );
@@ -395,6 +462,7 @@ export function GamificationWidget({ handle }: { handle: string }) {
 
   return (
     <div className="gami-widget" style={{ marginBottom: "24px" }}>
+      {accountContext}
       <style>{`
         .gami-grid {
           display: grid;
@@ -565,11 +633,9 @@ export function GamificationWidget({ handle }: { handle: string }) {
         </SectionCard>
       )}
 
-      <PrivateLeaderboardSection handle={handle} />
-
       <div style={{ marginTop: "10px" }}>
-        <a
-          href={`/duels?handle=${encodeURIComponent(handle)}`}
+        <Link
+          href="/duels"
           style={{
             display: "inline-flex",
             alignItems: "center",
@@ -585,7 +651,7 @@ export function GamificationWidget({ handle }: { handle: string }) {
           }}
         >
           Friend 1v1 duels →
-        </a>
+        </Link>
       </div>
     </div>
   );

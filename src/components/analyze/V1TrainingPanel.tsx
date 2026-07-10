@@ -23,6 +23,9 @@ import {
   setApiToken,
   syncHandle,
 } from "@/lib/v1Api";
+import { useAuth } from "@/hooks/useAuth";
+import SignInGate from "@/components/auth/SignInGate";
+import HandleClaimPanel from "@/components/auth/HandleClaimPanel";
 
 const COLORS = {
   bg: "#06100D",
@@ -125,45 +128,59 @@ function PanelTitle({ title, subtitle }: { title: string; subtitle?: string }) {
 }
 
 export function V1TrainingPanel({ handle }: { handle: string }) {
+  const auth = useAuth();
+  const accountId = auth.status === "signed_in" ? auth.user?.user_id ?? null : null;
   const [tokenInput, setTokenInput] = useState("");
-  const [plan, setPlan] = useState<string>("free");
+  const [planState, setPlanState] = useState<{ accountId: string; value: string } | null>(null);
+  const plan = planState?.accountId === accountId ? planState.value : "free";
   const [phase, setPhase] = useState<"idle" | "syncing" | "analyzing" | "queueing" | "done" | "error">("idle");
   const [error, setError] = useState("");
   const [weakness, setWeakness] = useState<WeaknessResponse | null>(null);
   const [queue, setQueue] = useState<QueueResponse | null>(null);
   const [plan7, setPlan7] = useState<PlanResponse | null>(null);
-  const [plan14, setPlan14] = useState<PlanResponse | null>(null);
+  const [plan14State, setPlan14State] = useState<{ accountId: string; value: PlanResponse } | null>(null);
+  const plan14 = plan14State?.accountId === accountId ? plan14State.value : null;
   const [plan14Gate, setPlan14Gate] = useState("");
-  const [weekly, setWeekly] = useState<WeeklyReportResponse | null>(null);
+  const [weeklyState, setWeeklyState] = useState<{ accountId: string; value: WeeklyReportResponse } | null>(null);
+  const weekly = weeklyState?.accountId === accountId ? weeklyState.value : null;
   const [weeklyGate, setWeeklyGate] = useState("");
 
   const refreshPlan = useCallback(async () => {
+    const requestedToken = getApiToken();
+    if (!accountId) {
+      return;
+    }
     try {
       const me = await getMyEntitlements();
-      setPlan(me.plan);
+      if (getApiToken() === requestedToken) setPlanState({ accountId, value: me.plan });
     } catch {
-      setPlan("free");
+      if (getApiToken() === requestedToken) setPlanState({ accountId, value: "free" });
     }
-  }, []);
+  }, [accountId]);
 
   useEffect(() => {
     // localStorage is client-only: hydrate the token after mount (a lazy
     // useState initializer would mismatch the server-rendered value).
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setTokenInput(getApiToken());
-    refreshPlan();
+  }, []);
+
+  useEffect(() => {
+    // The state update happens only after the entitlement request resolves.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void refreshPlan();
   }, [refreshPlan]);
 
   const saveToken = async () => {
     setApiToken(tokenInput);
-    await refreshPlan();
+    await auth.refresh();
     // Server-shaped responses depend on the plan — clear stale views.
     setWeakness(null);
     setQueue(null);
     setPlan7(null);
-    setPlan14(null);
+    setPlan14State(null);
     setPlan14Gate("");
-    setWeekly(null);
+    setWeeklyState(null);
     setWeeklyGate("");
     setPhase("idle");
   };
@@ -192,10 +209,16 @@ export function V1TrainingPanel({ handle }: { handle: string }) {
   }, [handle]);
 
   const loadPlan14 = async () => {
+    const requestedAccount = accountId;
+    const requestedToken = getApiToken();
     setPlan14Gate("");
     try {
-      setPlan14(await getPlan(handle, "14-day"));
+      const response = await getPlan(handle, "14-day");
+      if (requestedAccount && getApiToken() === requestedToken) {
+        setPlan14State({ accountId: requestedAccount, value: response });
+      }
     } catch (err) {
+      if (getApiToken() !== requestedToken) return;
       if (err instanceof V1ApiError && err.isPremiumGate) {
         setPlan14Gate("The 14-day plan is a Premium feature. Enter your Premium token above to unlock it.");
       } else {
@@ -205,10 +228,31 @@ export function V1TrainingPanel({ handle }: { handle: string }) {
   };
 
   const loadWeekly = async () => {
+    const requestedAccount = accountId;
+    const requestedToken = getApiToken();
     setWeeklyGate("");
+    if (auth.status !== "signed_in" || !auth.user) {
+      setWeeklyGate("Sign in before loading a private weekly report.");
+      return;
+    }
+    if (!auth.user.handle_verified || !auth.user.handle) {
+      setWeeklyGate("Verify your own Codeforces handle before loading its private weekly report.");
+      return;
+    }
+    if (auth.user.handle.toLowerCase() !== handle.toLowerCase()) {
+      setWeeklyGate(
+        `You are viewing ${handle} publicly, but this account owns @${auth.user.handle}. ` +
+        `Open /analyze?handle=${auth.user.handle} to load your private report.`
+      );
+      return;
+    }
     try {
-      setWeekly(await getWeeklyReport(handle));
+      const response = await getWeeklyReport(handle);
+      if (requestedAccount && getApiToken() === requestedToken) {
+        setWeeklyState({ accountId: requestedAccount, value: response });
+      }
     } catch (err) {
+      if (getApiToken() !== requestedToken) return;
       if (err instanceof V1ApiError && err.isPremiumGate) {
         setWeeklyGate("The weekly progress report is a Premium feature. Enter your Premium token above to unlock it.");
       } else {
@@ -218,6 +262,12 @@ export function V1TrainingPanel({ handle }: { handle: string }) {
   };
 
   const busy = phase === "syncing" || phase === "analyzing" || phase === "queueing";
+  const ownsViewedHandle = Boolean(
+    auth.status === "signed_in" &&
+    auth.user?.handle_verified &&
+    auth.user.handle &&
+    auth.user.handle.toLowerCase() === handle.toLowerCase()
+  );
 
   return (
     <section style={{ marginTop: "56px", borderTop: `1px solid ${COLORS.border}`, paddingTop: "40px" }}>
@@ -423,7 +473,7 @@ export function V1TrainingPanel({ handle }: { handle: string }) {
               Load 14-day plan
             </button>
           )}
-          {!weekly && (
+          {!weekly && ownsViewedHandle && (
             <button
               onClick={loadWeekly}
               style={{
@@ -435,6 +485,40 @@ export function V1TrainingPanel({ handle }: { handle: string }) {
               Load weekly report
             </button>
           )}
+        </div>
+      )}
+
+      {phase === "done" && !weekly && auth.status === "loading" && (
+        <p style={{ fontSize: "12px", color: COLORS.muted, marginTop: "16px" }}>Checking your account before showing the private weekly report…</p>
+      )}
+
+      {phase === "done" && !weekly && auth.status === "signed_out" && (
+        <div style={{ marginTop: "16px" }}>
+          <SignInGate
+            onSignIn={() => void auth.signIn()}
+            busy={auth.busy}
+            error={auth.error}
+            title="Sign in for your weekly report"
+            message={`The analysis for ${handle} is public. Weekly reports are private and require the signed-in, verified owner.`}
+          />
+        </div>
+      )}
+
+      {phase === "done" && !weekly && auth.status === "signed_in" && auth.user && !auth.user.handle_verified && (
+        <Card style={{ marginTop: "16px" }}>
+          <p style={{ fontSize: "12px", color: COLORS.muted, margin: "0 0 12px", lineHeight: "17px" }}>
+            You are viewing <strong style={{ color: COLORS.text }}>{handle}</strong> publicly. Verify only a Codeforces handle you control before requesting its private weekly report.
+          </p>
+          <HandleClaimPanel user={auth.user} onVerified={() => void auth.refresh()} />
+        </Card>
+      )}
+
+      {phase === "done" && !weekly && auth.status === "signed_in" && auth.user?.handle_verified && !ownsViewedHandle && (
+        <div style={{ marginTop: "16px" }}>
+          <LockCard
+            label="Weekly progress report"
+            hint={`This account owns @${auth.user.handle}; ${handle} is only being viewed publicly. Open your verified handle to load your private report.`}
+          />
         </div>
       )}
 

@@ -14,6 +14,8 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { DuelState, V1ApiError, readyDuel, startDuel } from "@/lib/v1Api";
 import { useDuelState } from "@/hooks/useDuelState";
+import { useAuth } from "@/hooks/useAuth";
+import SignInGate from "@/components/auth/SignInGate";
 
 const COLORS = {
   bg: "#06100D",
@@ -53,10 +55,9 @@ export function inviteStorageKey(duelId: string): string {
   return `sx_duel_invite_${duelId}`;
 }
 
-function arenaHref(state: DuelState, handle: string): string {
+function arenaHref(state: DuelState): string {
   const params = new URLSearchParams();
   params.set("duel", state.duel_id);
-  if (handle) params.set("handle", handle);
   if (state.problem?.problem_id) params.set("problem", state.problem.problem_id);
   return `/arena?${params.toString()}`;
 }
@@ -64,12 +65,13 @@ function arenaHref(state: DuelState, handle: string): string {
 function DuelRoomContent({ duelId }: { duelId: string }) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const handle = (searchParams.get("handle") || "").trim();
+  const auth = useAuth();
+  const signedIn = auth.status === "signed_in" && !!auth.user;
 
   const { state, fatalError, transientError, applyState } = useDuelState(
-    handle ? duelId : null,
-    handle || undefined,
-    1500
+    signedIn ? duelId : null,
+    1500,
+    signedIn ? auth.user?.user_id ?? null : null
   );
 
   const [actionError, setActionError] = useState<string | null>(null);
@@ -114,9 +116,9 @@ function DuelRoomContent({ duelId }: { duelId: string }) {
   // Countdown done → both players enter the Arena together.
   useEffect(() => {
     if (state && state.status === "active" && countdownLeft !== null && countdownLeft <= 0) {
-      router.push(arenaHref(state, handle));
+      router.push(arenaHref(state));
     }
-  }, [state, countdownLeft, router, handle]);
+  }, [state, countdownLeft, router]);
 
   const me = state?.participants.find((p) => p.is_viewer) ?? null;
   const opponent = state?.participants.find((p) => !p.is_viewer) ?? null;
@@ -126,7 +128,7 @@ function DuelRoomContent({ duelId }: { duelId: string }) {
     setActionError(null);
     setReadying(true);
     try {
-      applyState(await readyDuel(duelId, handle));
+      applyState(await readyDuel(duelId));
     } catch (e) {
       setActionError(e instanceof V1ApiError ? e.message : "Could not mark ready.");
     } finally {
@@ -138,7 +140,7 @@ function DuelRoomContent({ duelId }: { duelId: string }) {
     setActionError(null);
     setStarting(true);
     try {
-      await startDuel(duelId, handle);
+      await startDuel(duelId);
     } catch (e) {
       setActionError(e instanceof V1ApiError ? e.message : "Could not start the duel.");
     } finally {
@@ -183,16 +185,21 @@ function DuelRoomContent({ duelId }: { duelId: string }) {
               {state?.mode === "classic_30" ? "Classic — 30 minutes" : "Rapid — 10 minutes"}
             </h1>
           </div>
-          <Link href={handle ? `/duels?handle=${encodeURIComponent(handle)}` : "/duels"} style={{ fontSize: "12px", color: COLORS.cyan, textDecoration: "none" }}>
+          <Link href="/duels" style={{ fontSize: "12px", color: COLORS.cyan, textDecoration: "none" }}>
             ← All duels
           </Link>
         </div>
 
-        {!handle && (
-          <p style={{ ...cardStyle(), fontSize: "13px", color: COLORS.amber }}>
-            Open this room with your Codeforces handle, e.g.{" "}
-            <code>/duels/{duelId}?handle=your_cf_handle</code>
-          </p>
+        {auth.status === "loading" && <p style={{ fontSize: "13px", color: COLORS.muted }}>Loading…</p>}
+
+        {auth.status === "signed_out" && (
+          <SignInGate
+            onSignIn={() => void auth.signIn()}
+            busy={auth.busy}
+            error={auth.error}
+            title="Sign in to enter this duel room"
+            message="Sign in to compete. A verified Codeforces handle is optional and is used only as an authoritative public identity."
+          />
         )}
 
         {fatalError && (
@@ -204,7 +211,7 @@ function DuelRoomContent({ duelId }: { duelId: string }) {
           </div>
         )}
 
-        {handle && !fatalError && (
+        {signedIn && !fatalError && (
           <>
             {/* Status banner / countdown */}
             <div
@@ -311,7 +318,7 @@ function DuelRoomContent({ duelId }: { duelId: string }) {
                   </>
                 )}
                 {state.status === "active" && (
-                  <Link href={arenaHref(state, handle)} style={{ ...btn(true), textDecoration: "none", display: "inline-block" }}>
+                  <Link href={arenaHref(state)} style={{ ...btn(true), textDecoration: "none", display: "inline-block" }}>
                     Enter Arena →
                   </Link>
                 )}
@@ -331,7 +338,7 @@ function DuelRoomContent({ duelId }: { duelId: string }) {
                   </div>
                 )}
                 <div style={{ marginTop: "10px" }}>
-                  <Link href={arenaHref(state, handle)} style={{ fontSize: "12px", color: COLORS.cyan }}>
+                  <Link href={arenaHref(state)} style={{ fontSize: "12px", color: COLORS.cyan }}>
                     View result in Arena →
                   </Link>
                 </div>

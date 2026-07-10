@@ -2,16 +2,24 @@
  * Typed client for the SolveX backend /api/v1 endpoints.
  *
  * - Base URL comes from NEXT_PUBLIC_API_URL (see apiBase.ts).
- * - Premium users paste their API token (issued by the SolveX team); it is
- *   stored in localStorage and sent as `Authorization: Bearer …`.
+ * - Security: a Codeforces handle is PUBLIC data and is never treated as
+ *   identity. Authenticated identity comes ONLY from a bearer token — see
+ *   registerAccount()/ensureAuthToken(). Premium users can still paste a
+ *   team-issued token; both flows just populate the same stored token.
  *   Admin keys are NEVER used from the browser.
- * - Anonymous calls are valid and resolve to the free tier server-side.
+ * - PvP duels, private leaderboards, and private gamification (XP/streak/
+ *   badges) all REQUIRE a valid token now — the localStorage token alone is
+ *   never trusted as proof of identity by the UI; always confirm via
+ *   getAuthMe() before showing "signed in" state, since only the backend can
+ *   validate the token.
+ * - /analyze (public Codeforces-derived analysis) remains anonymous/public.
  */
 
 import { API_BASE } from "@/lib/apiBase";
 import type { AnalysisResult } from "@/lib/cfAnalysis";
 
 const TOKEN_KEY = "solvex_api_token";
+export const AUTH_TOKEN_CHANGED_EVENT = "solvex:auth-token-changed";
 
 // ─── Token storage ────────────────────────────────────────────────────────────
 
@@ -24,6 +32,9 @@ export function setApiToken(token: string): void {
   if (typeof window === "undefined") return;
   if (token.trim()) window.localStorage.setItem(TOKEN_KEY, token.trim());
   else window.localStorage.removeItem(TOKEN_KEY);
+  // `storage` does not fire in the tab that made the change. Notify every
+  // mounted auth consumer without exposing the token in the event payload.
+  window.dispatchEvent(new Event(AUTH_TOKEN_CHANGED_EVENT));
 }
 
 function authHeaders(): Record<string, string> {
@@ -72,6 +83,79 @@ async function v1Fetch<T>(path: string, init?: RequestInit): Promise<T> {
     );
   }
   return body as T;
+}
+
+// ─── Account + Codeforces handle verification (security hotfix) ─────────────
+//
+// A CF handle is public data and must never be trusted as authentication.
+// registerAccount() is the only way an ordinary visitor gets a bearer token
+// (no email/password — the token itself is the credential, same model as a
+// team-issued premium token). It proves nothing about any CF identity until
+// the owner explicitly verifies a handle via claimHandle()/verifyHandleClaim().
+
+export interface AuthUser {
+  user_id: string;
+  role: string;
+  handle: string | null;
+  handle_verified: boolean;
+}
+
+export function registerAccount(): Promise<{ user_id: string; api_token: string; role: string }> {
+  return v1Fetch("/api/v1/auth/register", { method: "POST" });
+}
+
+export function getAuthMe(): Promise<AuthUser> {
+  return v1Fetch("/api/v1/auth/me");
+}
+
+/** Returns the current token, or registers a fresh account and persists its
+ * token if none is stored yet. Call this from an explicit user action (e.g. a
+ * "Sign in" button), not silently on every page load. */
+export async function ensureAuthToken(): Promise<string> {
+  const existing = getApiToken();
+  if (existing) return existing;
+  const account = await registerAccount();
+  setApiToken(account.api_token);
+  return account.api_token;
+}
+
+export interface HandleClaimStart {
+  already_verified: boolean;
+  claim_id?: string;
+  handle: string;
+  verification_code?: string;
+  verification_field?: string;
+  expires_at?: string;
+  instructions?: string;
+}
+
+export interface HandleClaimSummary {
+  claim_id: string;
+  handle: string;
+  status: "pending" | "verified" | "expired" | "superseded";
+  created_at: string;
+  expires_at: string;
+}
+
+export function claimHandle(handle: string): Promise<HandleClaimStart> {
+  return v1Fetch("/api/v1/handles/claim", {
+    method: "POST",
+    body: JSON.stringify({ handle: handle.trim() }),
+  });
+}
+
+export function verifyHandleClaim(
+  claimId: string
+): Promise<{ handle: string; verified: boolean; already_verified: boolean }> {
+  return v1Fetch(`/api/v1/handles/claim/${encodeURIComponent(claimId)}/verify`, { method: "POST" });
+}
+
+export function getMyHandleClaims(): Promise<{
+  handle: string | null;
+  handle_verified: boolean;
+  claims: HandleClaimSummary[];
+}> {
+  return v1Fetch("/api/v1/handles/me");
 }
 
 // ─── Types (mirror backend v1 responses) ─────────────────────────────────────
@@ -289,9 +373,10 @@ export interface GamificationSnapshot {
   milestones?: GamificationMilestone[];
 }
 
-export function getGamification(handle?: string): Promise<GamificationSnapshot> {
-  const query = handle ? `?handle=${encodeURIComponent(handle)}` : "";
-  return v1Fetch<GamificationSnapshot>(`/api/v1/gamification/me${query}`);
+/** Requires auth — always returns the authenticated caller's own data. A
+ * handle can no longer select whose gamification snapshot to view. */
+export function getGamification(): Promise<GamificationSnapshot> {
+  return v1Fetch<GamificationSnapshot>("/api/v1/gamification/me");
 }
 
 // ─── Private leaderboards (Phase G3) ─────────────────────────────────────────
@@ -333,44 +418,31 @@ export interface CreateLeaderboardResponse extends LeaderboardSummary {
   invite_expires_at?: string;
 }
 
-export function listLeaderboards(handle?: string): Promise<{ leaderboards: LeaderboardSummary[] }> {
-  const query = handle ? `?handle=${encodeURIComponent(handle)}` : "";
-  return v1Fetch(`/api/v1/leaderboards${query}`);
+// All of these require auth — membership is resolved exclusively from the
+// bearer token, never a handle.
+
+export function listLeaderboards(): Promise<{ leaderboards: LeaderboardSummary[] }> {
+  return v1Fetch("/api/v1/leaderboards");
 }
 
-export function createLeaderboard(
-  name: string,
-  displayName: string,
-  handle?: string
-): Promise<CreateLeaderboardResponse> {
-  const query = handle ? `?handle=${encodeURIComponent(handle)}` : "";
-  return v1Fetch(`/api/v1/leaderboards${query}`, {
+export function createLeaderboard(name: string): Promise<CreateLeaderboardResponse> {
+  return v1Fetch("/api/v1/leaderboards", {
     method: "POST",
-    body: JSON.stringify({ name, display_name: displayName }),
+    body: JSON.stringify({ name }),
   });
 }
 
 export function joinLeaderboard(
-  inviteCode: string,
-  displayName: string,
-  handle?: string
+  inviteCode: string
 ): Promise<{ leaderboard_id: string; name: string; member_role: string; already_member: boolean }> {
   return v1Fetch("/api/v1/leaderboards/join", {
     method: "POST",
-    body: JSON.stringify({
-      invite_code: inviteCode.trim(),
-      display_name: displayName,
-      handle: handle ?? undefined,
-    }),
+    body: JSON.stringify({ invite_code: inviteCode.trim() }),
   });
 }
 
-export function getLeaderboardWeekly(
-  leaderboardId: string,
-  handle?: string
-): Promise<LeaderboardWeeklyResponse> {
-  const query = handle ? `?handle=${encodeURIComponent(handle)}` : "";
-  return v1Fetch(`/api/v1/leaderboards/${encodeURIComponent(leaderboardId)}/weekly${query}`);
+export function getLeaderboardWeekly(leaderboardId: string): Promise<LeaderboardWeeklyResponse> {
+  return v1Fetch(`/api/v1/leaderboards/${encodeURIComponent(leaderboardId)}/weekly`);
 }
 
 // ─── Friend duels (Phase G4) ─────────────────────────────────────────────────
@@ -426,7 +498,7 @@ export interface DuelDetail {
   expires_at: string;
   created_at: string;
   completed_at: string | null;
-  winner_subject: string | null;
+  winner_subject?: string | null;
   result_reason: string | null;
   judging_mode?: DuelJudgingMode;
   test_locked?: boolean;
@@ -464,57 +536,44 @@ export interface DuelSummary {
   role: string;
   created_at: string;
   expires_at: string;
-  winner_subject: string | null;
+  winner_subject?: string | null;
   result_reason: string | null;
 }
 
-export function listDuels(handle?: string): Promise<{ duels: DuelSummary[] }> {
-  const query = handle ? `?handle=${encodeURIComponent(handle)}` : "";
-  return v1Fetch(`/api/v1/duels${query}`);
+// All of these (except the invite preview) require auth — the participant is
+// resolved exclusively from the bearer token, never a handle.
+
+export function listDuels(): Promise<{ duels: DuelSummary[] }> {
+  return v1Fetch("/api/v1/duels");
 }
 
-export function createDuel(
-  mode: DuelMode,
-  displayName: string,
-  handle?: string
-): Promise<CreateDuelResponse> {
-  const query = handle ? `?handle=${encodeURIComponent(handle)}` : "";
-  return v1Fetch(`/api/v1/duels${query}`, {
+export function createDuel(mode: DuelMode): Promise<CreateDuelResponse> {
+  return v1Fetch("/api/v1/duels", {
     method: "POST",
-    body: JSON.stringify({ mode, display_name: displayName }),
+    body: JSON.stringify({ mode }),
   });
 }
 
+/** Public, unauthenticated: safe preview only. */
 export function previewDuelInvite(inviteCode: string): Promise<DuelInvitePreview> {
   return v1Fetch(`/api/v1/duels/invite/${encodeURIComponent(inviteCode)}`);
 }
 
 export function joinDuel(
-  inviteCode: string,
-  displayName: string,
-  handle?: string
+  inviteCode: string
 ): Promise<{ duel_id: string; status: string; already_member: boolean; role: string }> {
   return v1Fetch("/api/v1/duels/join", {
     method: "POST",
-    body: JSON.stringify({
-      invite_code: inviteCode.trim(),
-      display_name: displayName,
-      handle: handle ?? undefined,
-    }),
+    body: JSON.stringify({ invite_code: inviteCode.trim() }),
   });
 }
 
-export function getDuel(duelId: string, handle?: string): Promise<DuelDetail> {
-  const query = handle ? `?handle=${encodeURIComponent(handle)}` : "";
-  return v1Fetch(`/api/v1/duels/${encodeURIComponent(duelId)}${query}`);
+export function getDuel(duelId: string): Promise<DuelDetail> {
+  return v1Fetch(`/api/v1/duels/${encodeURIComponent(duelId)}`);
 }
 
-export function startDuel(
-  duelId: string,
-  handle?: string
-): Promise<DuelDetail & { arena_path?: string }> {
-  const query = handle ? `?handle=${encodeURIComponent(handle)}` : "";
-  return v1Fetch(`/api/v1/duels/${encodeURIComponent(duelId)}/start${query}`, {
+export function startDuel(duelId: string): Promise<DuelDetail & { arena_path?: string }> {
+  return v1Fetch(`/api/v1/duels/${encodeURIComponent(duelId)}/start`, {
     method: "POST",
     body: JSON.stringify({}),
   });
@@ -592,33 +651,26 @@ export interface DuelHintResponse {
   note?: string;
 }
 
-export function getDuelState(duelId: string, handle?: string): Promise<DuelState> {
-  const query = handle ? `?handle=${encodeURIComponent(handle)}` : "";
-  return v1Fetch(`/api/v1/duels/${encodeURIComponent(duelId)}/state${query}`);
+export function getDuelState(duelId: string): Promise<DuelState> {
+  return v1Fetch(`/api/v1/duels/${encodeURIComponent(duelId)}/state`);
 }
 
-export function readyDuel(duelId: string, handle?: string): Promise<DuelState> {
-  const query = handle ? `?handle=${encodeURIComponent(handle)}` : "";
-  return v1Fetch(`/api/v1/duels/${encodeURIComponent(duelId)}/ready${query}`, {
+export function readyDuel(duelId: string): Promise<DuelState> {
+  return v1Fetch(`/api/v1/duels/${encodeURIComponent(duelId)}/ready`, {
     method: "POST",
     body: JSON.stringify({}),
   });
 }
 
-export function openDuelArena(
-  duelId: string,
-  handle?: string
-): Promise<{ duel_id: string; arena_opened_at: string | null }> {
-  const query = handle ? `?handle=${encodeURIComponent(handle)}` : "";
-  return v1Fetch(`/api/v1/duels/${encodeURIComponent(duelId)}/open-arena${query}`, {
+export function openDuelArena(duelId: string): Promise<{ duel_id: string; arena_opened_at: string | null }> {
+  return v1Fetch(`/api/v1/duels/${encodeURIComponent(duelId)}/open-arena`, {
     method: "POST",
     body: JSON.stringify({}),
   });
 }
 
-export function requestDuelHint(duelId: string, handle?: string): Promise<DuelHintResponse> {
-  const query = handle ? `?handle=${encodeURIComponent(handle)}` : "";
-  return v1Fetch(`/api/v1/duels/${encodeURIComponent(duelId)}/hint${query}`, {
+export function requestDuelHint(duelId: string): Promise<DuelHintResponse> {
+  return v1Fetch(`/api/v1/duels/${encodeURIComponent(duelId)}/hint`, {
     method: "POST",
     body: JSON.stringify({}),
   });
@@ -631,8 +683,7 @@ export function submitDuel(
     source_code: string;
     stdin?: string;
     expected_output?: string | null;
-  },
-  handle?: string
+  }
 ): Promise<{
   submission_id: string;
   judge_status: string;
@@ -644,20 +695,16 @@ export function submitDuel(
   message: string;
   duel: DuelDetail;
 }> {
-  const query = handle ? `?handle=${encodeURIComponent(handle)}` : "";
-  return v1Fetch(`/api/v1/duels/${encodeURIComponent(duelId)}/submit${query}`, {
+  return v1Fetch(`/api/v1/duels/${encodeURIComponent(duelId)}/submit`, {
     method: "POST",
     body: JSON.stringify(payload),
   });
 }
 
-export function getDuelResult(
-  duelId: string,
-  handle?: string
-): Promise<{
+export function getDuelResult(duelId: string): Promise<{
   duel_id: string;
   status: DuelStatus;
-  winner_subject: string | null;
+  winner_subject?: string | null;
   result_reason: string | null;
   completed_at: string | null;
   participants: DuelParticipant[];
@@ -665,8 +712,7 @@ export function getDuelResult(
   viewer_won: boolean;
   is_draw: boolean;
 }> {
-  const query = handle ? `?handle=${encodeURIComponent(handle)}` : "";
-  return v1Fetch(`/api/v1/duels/${encodeURIComponent(duelId)}/result${query}`);
+  return v1Fetch(`/api/v1/duels/${encodeURIComponent(duelId)}/result`);
 }
 
 // ─── Endpoints ────────────────────────────────────────────────────────────────
@@ -702,6 +748,9 @@ export function getPlan(handle: string, planType: "7-day" | "14-day"): Promise<P
   });
 }
 
+/** Requires auth AND that the caller is the verified owner of `handle`
+ * (security hotfix) — throws V1ApiError 401 if signed out, 403 if the
+ * handle isn't verified for this account, 402 if the plan lacks the feature. */
 export function getWeeklyReport(handle: string): Promise<WeeklyReportResponse> {
   return v1Fetch<WeeklyReportResponse>(`/api/v1/weekly-report/${encodeURIComponent(handle)}`);
 }

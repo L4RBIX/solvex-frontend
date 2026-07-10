@@ -1,10 +1,14 @@
 "use client";
 
 /**
- * Private weekly leaderboard section (Phase G3).
+ * Private weekly leaderboard section (Phase G3, security hotfix).
  *
  * Isolated from core gamification: failures here never break /analyze, the
  * daily queue, plans, Arena, or Copilot. Invite-only — no global ranking.
+ *
+ * Security: membership requires a signed-in account (a Codeforces handle is
+ * public data and carries no membership weight on its own) — shows a
+ * SignInGate until the visitor signs in.
  */
 
 import { useCallback, useEffect, useState } from "react";
@@ -13,10 +17,13 @@ import {
   LeaderboardWeeklyResponse,
   V1ApiError,
   createLeaderboard,
+  getApiToken,
   getLeaderboardWeekly,
   joinLeaderboard,
   listLeaderboards,
 } from "@/lib/v1Api";
+import { useAuth } from "@/hooks/useAuth";
+import SignInGate from "@/components/auth/SignInGate";
 
 const COLORS = {
   bg: "#06100D",
@@ -58,56 +65,68 @@ function buttonStyle(variant: "primary" | "ghost" = "primary"): React.CSSPropert
 }
 
 export function PrivateLeaderboardSection({ handle }: { handle: string }) {
+  const auth = useAuth();
+  const signedIn = auth.status === "signed_in" && !!auth.user;
+  const accountId = signedIn ? auth.user!.user_id : null;
   const [status, setStatus] = useState<Status>("loading");
-  const [groups, setGroups] = useState<LeaderboardSummary[]>([]);
+  const [groupState, setGroupState] = useState<{ accountId: string; groups: LeaderboardSummary[] } | null>(null);
+  const groups = groupState?.accountId === accountId ? groupState.groups : [];
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [weekly, setWeekly] = useState<LeaderboardWeeklyResponse | null>(null);
+  const [weeklyState, setWeeklyState] = useState<{ accountId: string; weekly: LeaderboardWeeklyResponse } | null>(null);
+  const weekly = weeklyState?.accountId === accountId ? weeklyState.weekly : null;
   const [weeklyStatus, setWeeklyStatus] = useState<Status>("loading");
 
   const [createName, setCreateName] = useState("");
-  const [displayName, setDisplayName] = useState(handle);
   const [inviteCode, setInviteCode] = useState("");
-  const [actionMsg, setActionMsg] = useState<string | null>(null);
+  const [actionMsgState, setActionMsgState] = useState<{ accountId: string; value: string } | null>(null);
+  const actionMsg = actionMsgState?.accountId === accountId ? actionMsgState.value : null;
   const [actionErr, setActionErr] = useState<string | null>(null);
-  const [lastInvite, setLastInvite] = useState<string | null>(null);
+  const [lastInviteState, setLastInviteState] = useState<{ accountId: string; value: string } | null>(null);
+  const lastInvite = lastInviteState?.accountId === accountId ? lastInviteState.value : null;
 
   const loadGroups = useCallback(async () => {
-    if (!handle) {
-      setGroups([]);
+    const requestedAccount = accountId;
+    const requestedToken = getApiToken();
+    if (!requestedAccount) {
       setStatus("ready");
       return;
     }
     setStatus("loading");
     try {
-      const res = await listLeaderboards(handle);
-      setGroups(res.leaderboards);
+      const res = await listLeaderboards();
+      if (getApiToken() !== requestedToken) return;
+      setGroupState({ accountId: requestedAccount, groups: res.leaderboards });
       setSelectedId((prev) => {
         if (prev && res.leaderboards.some((g) => g.leaderboard_id === prev)) return prev;
         return res.leaderboards[0]?.leaderboard_id ?? null;
       });
       setStatus("ready");
     } catch {
-      setGroups([]);
+      if (getApiToken() !== requestedToken) return;
+      setGroupState({ accountId: requestedAccount, groups: [] });
       setStatus("error");
     }
-  }, [handle]);
+  }, [accountId]);
 
   const loadWeekly = useCallback(async (leaderboardId: string | null) => {
-    if (!handle || !leaderboardId) {
-      setWeekly(null);
+    const requestedAccount = accountId;
+    const requestedToken = getApiToken();
+    if (!requestedAccount || !leaderboardId) {
       setWeeklyStatus("ready");
       return;
     }
     setWeeklyStatus("loading");
     try {
-      const res = await getLeaderboardWeekly(leaderboardId, handle);
-      setWeekly(res);
+      const res = await getLeaderboardWeekly(leaderboardId);
+      if (getApiToken() !== requestedToken) return;
+      setWeeklyState({ accountId: requestedAccount, weekly: res });
       setWeeklyStatus("ready");
     } catch {
-      setWeekly(null);
+      if (getApiToken() !== requestedToken) return;
+      setWeeklyState(null);
       setWeeklyStatus("error");
     }
-  }, [handle]);
+  }, [accountId]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -120,38 +139,56 @@ export function PrivateLeaderboardSection({ handle }: { handle: string }) {
   }, [selectedId, loadWeekly]);
 
   const onCreate = async () => {
+    const requestedAccount = accountId;
+    const requestedToken = getApiToken();
+    if (!requestedAccount) return;
     setActionErr(null);
-    setActionMsg(null);
-    if (!createName.trim() || !displayName.trim()) {
-      setActionErr("Enter a group name and your display name.");
+    setActionMsgState(null);
+    if (!createName.trim()) {
+      setActionErr("Enter a group name.");
       return;
     }
     try {
-      const created = await createLeaderboard(createName.trim(), displayName.trim(), handle);
-      setLastInvite(created.invite_code);
-      setActionMsg(`Created "${created.name}". Share the invite code with friends.`);
+      const created = await createLeaderboard(createName.trim());
+      if (getApiToken() !== requestedToken) return;
+      setLastInviteState({ accountId: requestedAccount, value: created.invite_code });
+      setActionMsgState({
+        accountId: requestedAccount,
+        value: `Created "${created.name}". Share the invite code with friends.`,
+      });
       setCreateName("");
       await loadGroups();
+      if (getApiToken() !== requestedToken) return;
       setSelectedId(created.leaderboard_id);
     } catch (err) {
+      if (getApiToken() !== requestedToken) return;
       setActionErr(err instanceof V1ApiError ? err.message : "Could not create leaderboard.");
     }
   };
 
   const onJoin = async () => {
+    const requestedAccount = accountId;
+    const requestedToken = getApiToken();
+    if (!requestedAccount) return;
     setActionErr(null);
-    setActionMsg(null);
-    if (!inviteCode.trim() || !displayName.trim()) {
-      setActionErr("Enter an invite code and display name.");
+    setActionMsgState(null);
+    if (!inviteCode.trim()) {
+      setActionErr("Enter an invite code.");
       return;
     }
     try {
-      const joined = await joinLeaderboard(inviteCode.trim(), displayName.trim(), handle);
-      setActionMsg(joined.already_member ? `Already in "${joined.name}".` : `Joined "${joined.name}".`);
+      const joined = await joinLeaderboard(inviteCode.trim());
+      if (getApiToken() !== requestedToken) return;
+      setActionMsgState({
+        accountId: requestedAccount,
+        value: joined.already_member ? `Already in "${joined.name}".` : `Joined "${joined.name}".`,
+      });
       setInviteCode("");
       await loadGroups();
+      if (getApiToken() !== requestedToken) return;
       setSelectedId(joined.leaderboard_id);
     } catch (err) {
+      if (getApiToken() !== requestedToken) return;
       const msg = err instanceof V1ApiError ? err.message : "Could not join.";
       setActionErr(msg.includes("INVITE") || msg.includes("invite") ? "Invite code is invalid or expired." : msg);
     }
@@ -176,6 +213,20 @@ export function PrivateLeaderboardSection({ handle }: { handle: string }) {
         </div>
       </div>
 
+      {!signedIn ? (
+        <SignInGate
+          onSignIn={() => void auth.signIn()}
+          busy={auth.busy}
+          error={auth.error}
+          title="Sign in for private leaderboards"
+          message={`The analysis for ${handle || "this handle"} is public. Private leaderboard membership always belongs to a signed-in SolveX account.`}
+        />
+      ) : (
+        <>
+      <p style={{ fontSize: "11px", color: COLORS.muted, margin: "0 0 10px", lineHeight: "16px" }}>
+        Viewing <strong style={{ color: COLORS.text }}>{handle}</strong> publicly; leaderboard actions belong to <strong style={{ color: COLORS.text }}>{auth.user?.handle ? `@${auth.user.handle}` : "your signed-in account"}</strong>.
+        {auth.user?.handle ? " Verified handles are used as authoritative member names." : " SolveX uses a server-generated member label until you verify your own handle."}
+      </p>
       {status === "loading" && (
         <p style={{ fontSize: "12px", color: COLORS.muted, margin: 0 }}>Loading leaderboards…</p>
       )}
@@ -192,13 +243,6 @@ export function PrivateLeaderboardSection({ handle }: { handle: string }) {
       {status === "ready" && (
         <>
           <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginBottom: "10px" }}>
-            <input
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
-              placeholder="Your display name"
-              style={inputStyle()}
-              aria-label="Display name"
-            />
             <input
               value={createName}
               onChange={(e) => setCreateName(e.target.value)}
@@ -317,6 +361,8 @@ export function PrivateLeaderboardSection({ handle }: { handle: string }) {
               )}
             </>
           )}
+        </>
+      )}
         </>
       )}
     </div>

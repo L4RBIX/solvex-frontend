@@ -10,7 +10,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { DuelState, V1ApiError, getDuelState } from "@/lib/v1Api";
+import { DuelState, V1ApiError, getApiToken, getDuelState } from "@/lib/v1Api";
 
 const TERMINAL: ReadonlyArray<string> = ["completed", "expired", "cancelled"];
 
@@ -25,42 +25,56 @@ export interface UseDuelStateResult {
 
 export function useDuelState(
   duelId: string | null,
-  handle: string | undefined,
-  intervalMs = 1500
+  intervalMs = 1500,
+  identityKey: string | null = null
 ): UseDuelStateResult {
   const [state, setState] = useState<DuelState | null>(null);
+  const [stateKey, setStateKey] = useState<string | null>(null);
   const [fatalError, setFatalError] = useState<string | null>(null);
   const [transientError, setTransientError] = useState<string | null>(null);
+  const [errorKey, setErrorKey] = useState<string | null>(null);
   const stopped = useRef(false);
+  const requestKey = duelId && identityKey ? `${identityKey}:${duelId}` : null;
 
   const refresh = useCallback(async (): Promise<DuelState | null> => {
-    if (!duelId) return null;
+    const requestedKey = requestKey;
+    const requestedToken = getApiToken();
+    if (!duelId || !requestedKey) return null;
     try {
-      const next = await getDuelState(duelId, handle);
+      const next = await getDuelState(duelId);
+      if (getApiToken() !== requestedToken) return null;
       setState(next);
+      setStateKey(requestedKey);
       setTransientError(null);
       setFatalError(null);
+      setErrorKey(requestedKey);
       if (TERMINAL.includes(next.status)) stopped.current = true;
       return next;
     } catch (e) {
+      if (getApiToken() !== requestedToken) return null;
       if (e instanceof V1ApiError && (e.status === 403 || e.status === 404 || e.status === 401)) {
         setFatalError(e.message);
+        setErrorKey(requestedKey);
         stopped.current = true;
       } else {
         setTransientError(e instanceof Error ? e.message : "Network error");
+        setErrorKey(requestedKey);
       }
       return null;
     }
-  }, [duelId, handle]);
+  }, [duelId, requestKey]);
 
   const applyState = useCallback((next: DuelState) => {
+    const key = requestKey;
+    if (!key) return;
     setState(next);
+    setStateKey(key);
     if (TERMINAL.includes(next.status)) stopped.current = true;
-  }, []);
+  }, [requestKey]);
 
   useEffect(() => {
     stopped.current = false;
-    if (!duelId) return;
+    if (!requestKey) return;
     let cancelled = false;
     const tick = () => {
       if (cancelled || stopped.current) return;
@@ -72,7 +86,13 @@ export function useDuelState(
       cancelled = true;
       clearInterval(timer);
     };
-  }, [duelId, refresh, intervalMs]);
+  }, [requestKey, refresh, intervalMs]);
 
-  return { state, fatalError, transientError, refresh, applyState };
+  return {
+    state: stateKey === requestKey ? state : null,
+    fatalError: errorKey === requestKey ? fatalError : null,
+    transientError: errorKey === requestKey ? transientError : null,
+    refresh,
+    applyState,
+  };
 }

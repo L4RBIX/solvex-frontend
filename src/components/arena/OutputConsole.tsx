@@ -21,6 +21,7 @@ const STATUS_CONFIG: Record<ExecutionStatus, { label: string; color: string }> =
   runtime_error:     { label: "Runtime Error",     color: "#FF6B00" },
   time_limit:        { label: "Time Limit",        color: "#FACC15" },
   compilation_error: { label: "Compilation Error", color: "#C586C0" },
+  no_tests:           { label: "Judging unavailable", color: "#FFAA33" },
   error:             { label: "Error",             color: "#FF4D6D" },
 };
 
@@ -121,6 +122,16 @@ export default function OutputConsole({ result, isRunning, events }: OutputConso
                 />
                 Running selected test…
                 <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+              </div>
+            ) : result?.status === "no_tests" ? (
+              <div style={{ border: "1px solid rgba(255,170,51,0.3)", borderRadius: "8px", padding: "12px", color: "#FFAA33" }}>
+                <strong>Judging unavailable</strong>
+                <p style={{ margin: "6px 0 0", color: "#9EB5AF", lineHeight: "18px" }}>
+                  This duel problem has no shared server-controlled tests.
+                </p>
+                <p style={{ margin: "4px 0 0", color: "#F4F7F6", lineHeight: "18px" }}>
+                  Your solution was not evaluated.
+                </p>
               </div>
             ) : result ? (
               <>

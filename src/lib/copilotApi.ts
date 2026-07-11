@@ -83,6 +83,7 @@ export interface CopilotRecentEvent {
 
 export interface CopilotPayload {
   session_id?: string;
+  duel_id?: string;
   message: string;
   mode: CopilotMode;
   help_level: number;
@@ -103,6 +104,7 @@ export interface CopilotResult {
   detected_issue_type?: string;
   evidence_type?: CopilotEvidenceType;
   verified_wrong?: boolean;
+  context_label?: "Post-match review" | string | null;
   error?: string;
 }
 

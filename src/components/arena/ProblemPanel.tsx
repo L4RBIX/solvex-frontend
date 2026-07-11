@@ -18,14 +18,14 @@ function ratingColor(rating: number): string {
 }
 
 export default function ProblemPanel({ problem }: ProblemPanelProps) {
-  const cfUrl = problem.is_sample
+  const cfUrl = problem.official_url ?? (problem.is_sample
     ? "https://codeforces.com/problemset"
     : (() => {
         const m = /^(\d+)([A-Za-z][A-Za-z0-9]*)$/.exec(problem.key);
         return m
           ? `https://codeforces.com/problemset/problem/${m[1]}/${m[2]}`
           : "https://codeforces.com/problemset";
-      })();
+      })());
 
   const rc = ratingColor(problem.rating);
 
@@ -210,6 +210,15 @@ export default function ProblemPanel({ problem }: ProblemPanelProps) {
             {problem.output_format}
           </p>
         </div>
+
+        {problem.constraints && (
+          <div>
+            <h3 style={{ fontSize: "10px", fontFamily: "ui-monospace, monospace", fontWeight: 700, color: "#4A6A5A", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "6px" }}>
+              Constraints
+            </h3>
+            <p style={{ fontSize: "13px", color: "#9EB5AF", lineHeight: "20px", margin: 0 }}>{problem.constraints}</p>
+          </div>
+        )}
 
         {/* Examples */}
         <div>

@@ -24,6 +24,7 @@ const STATUS_DOT: Record<ExecutionStatus, string> = {
   runtime_error:     "#FF6B00",
   time_limit:        "#FACC15",
   compilation_error: "#C586C0",
+  no_tests:           "#FFAA33",
   error:             "#FF4D6D",
 };
 
@@ -35,6 +36,7 @@ const STATUS_LABEL: Record<ExecutionStatus, string> = {
   runtime_error:     "Runtime Error",
   time_limit:        "Time Limit",
   compilation_error: "Compile Error",
+  no_tests:           "Judging unavailable",
   error:             "Error",
 };
 

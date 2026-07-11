@@ -56,7 +56,9 @@ export interface ArenaProblem {
   statement: string;
   input_format: string;
   output_format: string;
+  constraints?: string;
   sample_tests: Array<{ input: string; output: string; note?: string }>;
   notes?: string;
   is_sample: boolean;
+  official_url?: string | null;
 }

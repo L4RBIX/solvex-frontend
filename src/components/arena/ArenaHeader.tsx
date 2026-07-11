@@ -18,6 +18,8 @@ interface ArenaHeaderProps {
   onCopy: () => void;
   isRunning: boolean;
   isSubmitting: boolean;
+  submitDisabled?: boolean;
+  submitDisabledReason?: string;
   savedAt: number | null;
   snapshotCount: number;
 }
@@ -33,6 +35,8 @@ export default function ArenaHeader({
   onCopy,
   isRunning,
   isSubmitting,
+  submitDisabled = false,
+  submitDisabledReason,
   savedAt,
   snapshotCount,
 }: ArenaHeaderProps) {
@@ -46,6 +50,7 @@ export default function ArenaHeader({
   }
 
   const busy = isRunning || isSubmitting;
+  const cannotSubmit = busy || submitDisabled;
 
   return (
     <header
@@ -252,7 +257,8 @@ export default function ArenaHeader({
       <button
         type="button"
         onClick={onSubmit}
-        disabled={busy}
+        disabled={cannotSubmit}
+        title={submitDisabled ? submitDisabledReason : undefined}
         className="tx-press"
         style={{
           display: "flex",
@@ -265,12 +271,12 @@ export default function ArenaHeader({
           color: "#020806",
           fontSize: "12px",
           fontWeight: 700,
-          cursor: busy ? "not-allowed" : "pointer",
-          opacity: busy ? 0.4 : 1,
+          cursor: cannotSubmit ? "not-allowed" : "pointer",
+          opacity: cannotSubmit ? 0.4 : 1,
           transition: "opacity 0.15s",
         }}
-        onMouseEnter={(e) => { if (!busy) (e.currentTarget as HTMLButtonElement).style.opacity = "0.88"; }}
-        onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.opacity = busy ? "0.4" : "1"; }}
+        onMouseEnter={(e) => { if (!cannotSubmit) (e.currentTarget as HTMLButtonElement).style.opacity = "0.88"; }}
+        onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.opacity = cannotSubmit ? "0.4" : "1"; }}
       >
         {isSubmitting ? (
           <span

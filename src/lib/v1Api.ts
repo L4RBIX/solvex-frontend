@@ -438,6 +438,13 @@ export interface DuelProblem {
   contest_id?: number | null;
   index?: string | null;
   url?: string | null;
+  statement_summary?: string | null;
+  input_format?: string | null;
+  output_format?: string | null;
+  constraints?: string | null;
+  sample_tests?: Array<{ input: string; output: string; note?: string }>;
+  content_complete?: boolean;
+  content_notice?: string | null;
 }
 
 // Honest per-submission/per-participant verdict — never implies official
@@ -445,6 +452,7 @@ export interface DuelProblem {
 // contestiq_api/duels.py VERDICT_* constants.
 export type DuelVerdict =
   | "no_tests"
+  | "not_evaluated"
   | "compile_error"
   | "runtime_error"
   | "custom_tests_passed"
@@ -480,6 +488,8 @@ export interface DuelDetail {
   result_reason: string | null;
   judging_mode?: DuelJudgingMode;
   test_locked?: boolean;
+  judging_available?: boolean;
+  infrastructure_verdict?: "no_tests" | null;
   viewer_subject?: string | null;
   viewer_role?: string | null;
   participants: DuelParticipant[];
@@ -613,6 +623,8 @@ export interface DuelState {
   judging_mode: DuelJudgingMode;
   judging_note: string;
   test_locked: boolean;
+  judging_available: boolean;
+  infrastructure_verdict: "no_tests" | null;
   shared_test: DuelSharedTest | null;
   problem: DuelProblem;
   skill_id?: string | null;
@@ -659,11 +671,9 @@ export function submitDuel(
   payload: {
     language: "cpp17" | "python3";
     source_code: string;
-    stdin?: string;
-    expected_output?: string | null;
   }
 ): Promise<{
-  submission_id: string;
+  submission_id: string | null;
   judge_status: string;
   verdict?: DuelVerdict;
   judging_mode?: DuelJudgingMode;

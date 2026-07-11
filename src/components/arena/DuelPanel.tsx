@@ -21,6 +21,7 @@ const MUTED = "#8A9A96";
 // passed" here instead, per the honest-verdict policy.
 function opponentStatusLabel(p: DuelParticipantState, duelStatus: string): { text: string; color: string } {
   if (p.is_winner) return { text: "Won", color: MINT };
+  if (p.verdict === "no_tests") return { text: "Judging unavailable", color: AMBER };
   if (duelStatus === "completed" || duelStatus === "expired") {
     if (p.accepted) return { text: "Custom tests passed", color: MINT };
     return { text: duelStatus === "expired" ? "Draw" : "Lost", color: MUTED };
@@ -267,9 +268,12 @@ export function DuelResultOverlay({ state, onDismiss }: DuelResultOverlayProps) 
   // Practice-duel copy: judging is a shared custom test, not official
   // Codeforces verification — never imply the loser's solution is wrong
   // unless a verified failing test says so.
-  const heading = result.viewer_won ? "You won the practice duel" : result.is_draw ? "Draw" : "You lost";
-  const headingColor = result.viewer_won ? MINT : result.is_draw ? MUTED : RED;
-  const sub = result.viewer_won
+  const judgingUnavailable = result.result_reason === "judging_unavailable";
+  const heading = judgingUnavailable ? "Judging unavailable" : result.viewer_won ? "You won the practice duel" : result.is_draw ? "Draw" : "You lost";
+  const headingColor = judgingUnavailable ? AMBER : result.viewer_won ? MINT : result.is_draw ? MUTED : RED;
+  const sub = judgingUnavailable
+    ? "This duel problem has no shared server-controlled tests. Your solution was not evaluated."
+    : result.viewer_won
     ? "First to pass the shared custom tests. Well played!"
     : result.is_draw
       ? "Neither side passed the shared test in time — rematch?"

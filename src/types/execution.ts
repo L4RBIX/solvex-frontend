@@ -50,6 +50,7 @@ export type ExecutionStatus =
   | "runtime_error"
   | "time_limit"
   | "compilation_error"
+  | "no_tests"
   | "error";
 
 export interface ExecutionPayload {

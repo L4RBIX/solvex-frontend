@@ -1,7 +1,7 @@
 import type { ExecutionLanguage } from "@/types/execution";
 import type { ArenaProblem, ArenaEvent } from "@/types/arena";
 import { API_BASE } from "@/lib/apiBase";
-import { getApiToken } from "@/lib/v1Api";
+import { getAccessToken } from "@/lib/supabaseClient";
 
 const COPILOT_URL = `${API_BASE}/api/copilot`;
 
@@ -83,6 +83,7 @@ export interface CopilotRecentEvent {
 
 export interface CopilotPayload {
   session_id?: string;
+  duel_id?: string;
   message: string;
   mode: CopilotMode;
   help_level: number;
@@ -103,6 +104,7 @@ export interface CopilotResult {
   detected_issue_type?: string;
   evidence_type?: CopilotEvidenceType;
   verified_wrong?: boolean;
+  context_label?: "Post-match review" | string | null;
   error?: string;
 }
 
@@ -110,7 +112,7 @@ export interface CopilotResult {
 
 export async function askCopilot(payload: CopilotPayload): Promise<CopilotResult> {
   try {
-    const token = getApiToken();
+    const token = await getAccessToken();
     const res = await fetch(COPILOT_URL, {
       method: "POST",
       headers: {

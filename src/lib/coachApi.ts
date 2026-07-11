@@ -1,5 +1,5 @@
 import { API_BASE } from "@/lib/apiBase";
-import { getApiToken } from "@/lib/v1Api";
+import { getAccessToken } from "@/lib/supabaseClient";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -43,7 +43,7 @@ export function getOrCreateAnonKey(): string {
 export async function getCoachProfile(anonKey: string): Promise<CoachProfile | null> {
   try {
     const url = `${API_BASE}/api/copilot/profile?anonymous_user_key=${encodeURIComponent(anonKey)}`;
-    const token = getApiToken();
+    const token = await getAccessToken();
     const res = await fetch(url, {
       headers: token ? { Authorization: `Bearer ${token}` } : undefined,
       signal: AbortSignal.timeout(10_000),
@@ -58,7 +58,7 @@ export async function getCoachProfile(anonKey: string): Promise<CoachProfile | n
 
 export async function updateCoachProfile(anonKey: string): Promise<CoachProfile | null> {
   try {
-    const token = getApiToken();
+    const token = await getAccessToken();
     const res = await fetch(`${API_BASE}/api/copilot/profile/update`, {
       method: "POST",
       headers: {

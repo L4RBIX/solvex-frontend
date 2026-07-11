@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { Terminal, FlaskConical, Bot } from "lucide-react";
 import ArenaHeader from "./ArenaHeader";
+import ArenaRightTabs, { type ArenaRightTab } from "./ArenaRightTabs";
 import ProblemPanel from "./ProblemPanel";
 import CodeEditor from "./CodeEditor";
 import TestCasePanel from "./TestCasePanel";
@@ -85,10 +85,8 @@ function saveSnaps(key: string, snaps: CodeSnapshot[]) {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-type RightTab = "tests" | "console" | "copilot";
-
 const DUEL_JUDGE_STATUSES: ReadonlyArray<ExecutionStatus> = [
-  "accepted", "wrong_answer", "runtime_error", "time_limit", "compilation_error", "error",
+  "accepted", "wrong_answer", "runtime_error", "time_limit", "compilation_error", "no_tests", "error",
 ];
 
 function toExecutionStatus(status: string): ExecutionStatus {
@@ -112,7 +110,6 @@ export default function ArenaLayout() {
   const duelState = duel.state;
 
   const duelProblemData = duelState?.problem ?? null;
-  const duelJudgingNote = duelState?.judging_note ?? "";
   const duelProblem: ArenaProblem | null = useMemo(
     () =>
       duelProblemData
@@ -121,23 +118,19 @@ export default function ArenaLayout() {
             name: duelProblemData.name,
             rating: duelProblemData.rating ?? 0,
             tags: duelProblemData.tags ?? [],
-            time_limit: "see Codeforces",
-            memory_limit: "see Codeforces",
-            statement:
-              `Duel problem: ${duelProblemData.name}. SolveX does not store official Codeforces statements — ` +
-              `open the problem on Codeforces (link above) to read it.\n\n${duelJudgingNote}`,
-            input_format: "See the official statement on Codeforces.",
-            output_format: "See the official statement on Codeforces.",
-            sample_tests: [],
-            notes:
-              "Add a test case (input + expected output from the statement's samples), write your solution, " +
-              "and Submit. Whoever submits first locks that test as the shared one both players are judged " +
-              "against. First to pass the shared custom test wins — if both pass, fewer hints, then earlier pass, " +
-              "then fewer wrong attempts.",
+            time_limit: "Practice judge",
+            memory_limit: "Server limits",
+            statement: duelProblemData.statement_summary ?? "Task content is unavailable in SolveX.",
+            input_format: duelProblemData.input_format ?? "Input format unavailable.",
+            output_format: duelProblemData.output_format ?? "Output format unavailable.",
+            constraints: duelProblemData.constraints ?? undefined,
+            sample_tests: duelProblemData.sample_tests ?? [],
+            notes: `${duelProblemData.content_notice ?? ""} ${duelState?.judging_note ?? ""}`.trim(),
             is_sample: false,
+            official_url: duelProblemData.url,
           }
         : null,
-    [duelProblemData, duelJudgingNote]
+    [duelProblemData, duelState?.judging_note]
   );
 
   const problem = duelProblem ?? SAMPLE_PROBLEM;
@@ -150,7 +143,7 @@ export default function ArenaLayout() {
   const [isRunning, setIsRunning] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [runningId, setRunningId] = useState<string | null>(null);
-  const [rightTab, setRightTab] = useState<RightTab>("tests");
+  const [rightTab, setRightTab] = useState<ArenaRightTab>("tests");
   const [snapshots, setSnapshots] = useState<CodeSnapshot[]>([]);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [events, setEvents] = useState<ArenaEvent[]>([]);
@@ -163,7 +156,6 @@ export default function ArenaLayout() {
   const [hintError, setHintError] = useState<string | null>(null);
   const [resultDismissed, setResultDismissed] = useState(false);
   const duelKeyRef = useRef<string | null>(null);
-  const sharedTestPrefilledRef = useRef(false);
 
   const codeRef = useRef(code);
   const prevCodeRef = useRef(code);
@@ -248,45 +240,27 @@ export default function ArenaLayout() {
     if (duelParam && duelSignedIn) void openDuelArena(duelParam).catch(() => {});
   }, [duelParam, duelSignedIn]);
 
-  // Duel mode: when the duel problem loads, start from one empty custom test —
-  // the player copies a sample from the official statement.
+  // If client navigation reuses this component while Copilot was open in the
+  // normal Arena, unmount it before any duel context can reach its effects.
+  useEffect(() => {
+    if (duelParam && rightTab === "copilot") setRightTab("tests");
+  }, [duelParam, rightTab]);
+
+  // Public samples remain available for local Run. Ranked Submit never uses
+  // these editable fields; the backend uses its hidden locked test snapshot.
   useEffect(() => {
     if (!duelProblem || duelKeyRef.current === duelProblem.key) return;
     duelKeyRef.current = duelProblem.key;
-    sharedTestPrefilledRef.current = false;
-    setTestCases([
-      {
+    const samples = makeSampleTests(duelProblem);
+    setTestCases(samples.length > 0 ? samples : [{
         id: makeId(),
         input: "",
         expected_output: "",
         status: "not_run",
         is_sample: false,
-        label: "Duel test 1",
-      },
-    ]);
+        label: "Local test 1",
+      }]);
   }, [duelProblem]);
-
-  // Duel mode: once the shared test is locked (server-controlled — see
-  // duels.py _lock_shared_test), prefill it once so the second player codes
-  // against the SAME input/expected output they'll actually be judged on,
-  // instead of typing a different one that gets silently overridden.
-  useEffect(() => {
-    if (!duelState?.shared_test || sharedTestPrefilledRef.current) return;
-    sharedTestPrefilledRef.current = true;
-    const shared = duelState.shared_test;
-    setTestCases((prev) =>
-      prev.length > 0
-        ? prev.map((t, i) => (i === 0 ? { ...t, input: shared.input, expected_output: shared.expected_output } : t))
-        : [{
-            id: makeId(),
-            input: shared.input,
-            expected_output: shared.expected_output,
-            status: "not_run",
-            is_sample: false,
-            label: "Shared duel test",
-          }]
-    );
-  }, [duelState?.shared_test]);
 
   function handleLanguageChange(lang: ExecutionLanguage) {
     setLanguage(lang);
@@ -361,15 +335,13 @@ export default function ArenaLayout() {
 
   async function handleDuelSubmit() {
     if (!duelParam || !duelSignedIn) return;
-    const tc = testCases.find((t) => t.expected_output.trim());
-    if (!tc) {
+    if (duelState?.judging_available === false) {
       setResult({
-        status: "error",
+        status: "no_tests",
         stdout: "",
         stderr: "",
         is_mock: false,
-        message:
-          "Duel judging needs a test: add input + expected output (copy a sample from the official statement), then Submit.",
+        message: "Judging unavailable. This duel problem has no shared server-controlled tests. Your solution was not evaluated.",
       });
       setRightTab("console");
       return;
@@ -383,10 +355,8 @@ export default function ArenaLayout() {
       const res = await submitDuel(duelParam, {
         language,
         source_code: codeRef.current,
-        stdin: tc.input,
-        expected_output: tc.expected_output,
       });
-      const status = toExecutionStatus(res.judge_status);
+      const status = res.verdict === "no_tests" ? "no_tests" : toExecutionStatus(res.judge_status);
       setResult({
         status,
         stdout: "",
@@ -395,22 +365,26 @@ export default function ArenaLayout() {
         memory_kb: res.memory_kb ?? undefined,
         is_mock: false,
         passed: res.passed,
-        message: res.passed
+        message: status === "no_tests"
+          ? "Judging unavailable. This duel problem has no shared server-controlled tests. Your solution was not evaluated."
+          : res.passed
           ? res.duel.status === "completed"
             ? "Custom tests passed — duel decided!"
             : "Custom tests passed! Waiting for the final verdict…"
           : res.message || res.judge_status,
       });
       addEvent("result_received", { status, is_mock: false });
-      setTestCases((prev) => prev.map((t) => (t.id === tc.id ? { ...t, status } : t)));
       void duel.refresh();
     } catch (e) {
+      const noTests = e instanceof V1ApiError && e.errorCode === "DUEL_TESTS_UNAVAILABLE";
       setResult({
-        status: "error",
+        status: noTests ? "no_tests" : "error",
         stdout: "",
         stderr: "",
         is_mock: false,
-        message: e instanceof V1ApiError ? e.message : "Duel submit failed — check your connection and try again.",
+        message: noTests
+          ? "Judging unavailable. This duel problem has no shared server-controlled tests. Your solution was not evaluated."
+          : e instanceof V1ApiError ? e.message : "Duel submit failed — check your connection and try again.",
       });
       void duel.refresh();
     } finally {
@@ -486,6 +460,7 @@ export default function ArenaLayout() {
   // ─── Render ──────────────────────────────────────────────────────────────────
 
   const busy = isRunning || isSubmitting;
+  const duelJudgingUnavailable = Boolean(duelParam && duelState?.judging_available === false);
 
   return (
     <div
@@ -508,6 +483,8 @@ export default function ArenaLayout() {
         onCopy={handleCopy}
         isRunning={isRunning}
         isSubmitting={isSubmitting}
+        submitDisabled={duelJudgingUnavailable}
+        submitDisabledReason={duelJudgingUnavailable ? "Judging unavailable: this duel has no shared server-controlled tests." : undefined}
         savedAt={savedAt}
         snapshotCount={snapshots.length}
       />
@@ -604,56 +581,7 @@ export default function ArenaLayout() {
           className="arena-right"
         >
           {/* Tab bar */}
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              borderBottom: "1px solid rgba(0,245,160,0.08)",
-              background: "#020806",
-              flexShrink: 0,
-            }}
-          >
-            {([
-              { id: "tests" as RightTab,   Icon: FlaskConical, label: "Tests" },
-              { id: "console" as RightTab, Icon: Terminal,     label: "Console" },
-              { id: "copilot" as RightTab, Icon: Bot,          label: "Copilot" },
-            ] as const).map(({ id, Icon, label }) => (
-              <button
-                key={id}
-                type="button"
-                onClick={() => setRightTab(id)}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "5px",
-                  padding: "10px 14px",
-                  fontSize: "11px",
-                  fontFamily: "ui-monospace, monospace",
-                  background: "none",
-                  border: "none",
-                  borderBottom: rightTab === id ? "2px solid #00F5A0" : "2px solid transparent",
-                  color: rightTab === id ? "#00F5A0" : "#3A5A4A",
-                  cursor: "pointer",
-                  transition: "color 0.15s",
-                  marginBottom: "-1px",
-                }}
-              >
-                <Icon size={11} />
-                {label}
-                {id === "console" && busy && (
-                  <span
-                    style={{
-                      width: "5px",
-                      height: "5px",
-                      borderRadius: "50%",
-                      background: "#00D9F5",
-                      animation: "pulse 1.2s ease-in-out infinite",
-                    }}
-                  />
-                )}
-              </button>
-            ))}
-          </div>
+          <ArenaRightTabs active={rightTab} onSelect={setRightTab} busy={busy} duelMode={Boolean(duelParam)} />
 
           {/* Panel content */}
           <div style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
@@ -672,6 +600,10 @@ export default function ArenaLayout() {
               />
             ) : rightTab === "console" ? (
               <OutputConsole result={result} isRunning={busy} events={events} />
+            ) : duelParam ? (
+              <div style={{ padding: "18px", color: "#FFAA33", fontSize: "12px" }}>
+                Copilot is disabled during PvP to keep the duel fair.
+              </div>
             ) : (
               <CopilotPanel
                 messages={copilotMessages}

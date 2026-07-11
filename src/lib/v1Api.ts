@@ -3,13 +3,12 @@
  *
  * - Base URL comes from NEXT_PUBLIC_API_URL (see apiBase.ts).
  * - Security: a Codeforces handle is PUBLIC data and is never treated as
- *   identity. Authenticated identity comes ONLY from a bearer token — see
- *   registerAccount()/ensureAuthToken(). Premium users can still paste a
- *   team-issued token; both flows just populate the same stored token.
+ *   identity. Authenticated identity comes ONLY from the current Supabase
+ *   session access token, which the backend verifies cryptographically.
  *   Admin keys are NEVER used from the browser.
  * - PvP duels, private leaderboards, and private gamification (XP/streak/
- *   badges) all REQUIRE a valid token now — the localStorage token alone is
- *   never trusted as proof of identity by the UI; always confirm via
+ *   badges) all REQUIRE a valid token now — browser state is never trusted as
+ *   proof of identity by the UI; always confirm via
  *   getAuthMe() before showing "signed in" state, since only the backend can
  *   validate the token.
  * - /analyze (public Codeforces-derived analysis) remains anonymous/public.
@@ -17,29 +16,14 @@
 
 import { API_BASE } from "@/lib/apiBase";
 import type { AnalysisResult } from "@/lib/cfAnalysis";
-
-const TOKEN_KEY = "solvex_api_token";
-export const AUTH_TOKEN_CHANGED_EVENT = "solvex:auth-token-changed";
-
-// ─── Token storage ────────────────────────────────────────────────────────────
+import {
+  getAccessToken,
+  getCurrentAccessToken,
+  refreshAccessToken,
+} from "@/lib/supabaseClient";
 
 export function getApiToken(): string {
-  if (typeof window === "undefined") return "";
-  return window.localStorage.getItem(TOKEN_KEY) ?? "";
-}
-
-export function setApiToken(token: string): void {
-  if (typeof window === "undefined") return;
-  if (token.trim()) window.localStorage.setItem(TOKEN_KEY, token.trim());
-  else window.localStorage.removeItem(TOKEN_KEY);
-  // `storage` does not fire in the tab that made the change. Notify every
-  // mounted auth consumer without exposing the token in the event payload.
-  window.dispatchEvent(new Event(AUTH_TOKEN_CHANGED_EVENT));
-}
-
-function authHeaders(): Record<string, string> {
-  const token = getApiToken();
-  return token ? { Authorization: `Bearer ${token}` } : {};
+  return getCurrentAccessToken();
 }
 
 // ─── Errors ───────────────────────────────────────────────────────────────────
@@ -63,15 +47,24 @@ export class V1ApiError extends Error {
   }
 }
 
-async function v1Fetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
+async function requestWithToken(path: string, init: RequestInit | undefined, token: string): Promise<Response> {
+  const headers = new Headers(init?.headers);
+  headers.set("Content-Type", "application/json");
+  headers.delete("Authorization");
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  return fetch(`${API_BASE}${path}`, {
     ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...authHeaders(),
-      ...(init?.headers ?? {}),
-    },
+    headers,
   });
+}
+
+async function v1Fetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const originalToken = await getAccessToken();
+  let res = await requestWithToken(path, init, originalToken);
+  if (res.status === 401 && originalToken) {
+    const refreshedToken = await refreshAccessToken();
+    if (refreshedToken) res = await requestWithToken(path, init, refreshedToken);
+  }
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
     throw new V1ApiError(
@@ -88,35 +81,20 @@ async function v1Fetch<T>(path: string, init?: RequestInit): Promise<T> {
 // ─── Account + Codeforces handle verification (security hotfix) ─────────────
 //
 // A CF handle is public data and must never be trusted as authentication.
-// registerAccount() is the only way an ordinary visitor gets a bearer token
-// (no email/password — the token itself is the credential, same model as a
-// team-issued premium token). It proves nothing about any CF identity until
-// the owner explicitly verifies a handle via claimHandle()/verifyHandleClaim().
+// Supabase authenticates the account. It proves nothing about any CF identity
+// until the owner explicitly verifies a handle via the claim flow.
 
 export interface AuthUser {
   user_id: string;
   role: string;
+  email?: string | null;
+  auth_provider?: string;
   handle: string | null;
   handle_verified: boolean;
 }
 
-export function registerAccount(): Promise<{ user_id: string; api_token: string; role: string }> {
-  return v1Fetch("/api/v1/auth/register", { method: "POST" });
-}
-
 export function getAuthMe(): Promise<AuthUser> {
   return v1Fetch("/api/v1/auth/me");
-}
-
-/** Returns the current token, or registers a fresh account and persists its
- * token if none is stored yet. Call this from an explicit user action (e.g. a
- * "Sign in" button), not silently on every page load. */
-export async function ensureAuthToken(): Promise<string> {
-  const existing = getApiToken();
-  if (existing) return existing;
-  const account = await registerAccount();
-  setApiToken(account.api_token);
-  return account.api_token;
 }
 
 export interface HandleClaimStart {
@@ -460,6 +438,13 @@ export interface DuelProblem {
   contest_id?: number | null;
   index?: string | null;
   url?: string | null;
+  statement_summary?: string | null;
+  input_format?: string | null;
+  output_format?: string | null;
+  constraints?: string | null;
+  sample_tests?: Array<{ input: string; output: string; note?: string }>;
+  content_complete?: boolean;
+  content_notice?: string | null;
 }
 
 // Honest per-submission/per-participant verdict — never implies official
@@ -467,6 +452,7 @@ export interface DuelProblem {
 // contestiq_api/duels.py VERDICT_* constants.
 export type DuelVerdict =
   | "no_tests"
+  | "not_evaluated"
   | "compile_error"
   | "runtime_error"
   | "custom_tests_passed"
@@ -502,6 +488,8 @@ export interface DuelDetail {
   result_reason: string | null;
   judging_mode?: DuelJudgingMode;
   test_locked?: boolean;
+  judging_available?: boolean;
+  infrastructure_verdict?: "no_tests" | null;
   viewer_subject?: string | null;
   viewer_role?: string | null;
   participants: DuelParticipant[];
@@ -635,6 +623,8 @@ export interface DuelState {
   judging_mode: DuelJudgingMode;
   judging_note: string;
   test_locked: boolean;
+  judging_available: boolean;
+  infrastructure_verdict: "no_tests" | null;
   shared_test: DuelSharedTest | null;
   problem: DuelProblem;
   skill_id?: string | null;
@@ -681,11 +671,9 @@ export function submitDuel(
   payload: {
     language: "cpp17" | "python3";
     source_code: string;
-    stdin?: string;
-    expected_output?: string | null;
   }
 ): Promise<{
-  submission_id: string;
+  submission_id: string | null;
   judge_status: string;
   verdict?: DuelVerdict;
   judging_mode?: DuelJudgingMode;

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import localFont from "next/font/local";
 import "./globals.css";
+import { AuthProvider } from "@/components/auth/AuthProvider";
 
 const interV = localFont({
   src: [
@@ -37,7 +38,9 @@ export default function RootLayout({
       lang="en"
       className={`${interV.variable} ${rebondGrotesque.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col text-white" style={{ backgroundColor: "#050A08" }}>{children}</body>
+      <body className="min-h-full flex flex-col text-white" style={{ backgroundColor: "#050A08" }}>
+        <AuthProvider>{children}</AuthProvider>
+      </body>
     </html>
   );
 }

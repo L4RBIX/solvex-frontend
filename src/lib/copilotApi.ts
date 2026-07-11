@@ -1,7 +1,7 @@
 import type { ExecutionLanguage } from "@/types/execution";
 import type { ArenaProblem, ArenaEvent } from "@/types/arena";
 import { API_BASE } from "@/lib/apiBase";
-import { getApiToken } from "@/lib/v1Api";
+import { getAccessToken } from "@/lib/supabaseClient";
 
 const COPILOT_URL = `${API_BASE}/api/copilot`;
 
@@ -110,7 +110,7 @@ export interface CopilotResult {
 
 export async function askCopilot(payload: CopilotPayload): Promise<CopilotResult> {
   try {
-    const token = getApiToken();
+    const token = await getAccessToken();
     const res = await fetch(COPILOT_URL, {
       method: "POST",
       headers: {

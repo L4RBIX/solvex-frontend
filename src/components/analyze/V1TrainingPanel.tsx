@@ -20,7 +20,6 @@ import {
   getMyEntitlements,
   getPlan,
   getWeeklyReport,
-  setApiToken,
   syncHandle,
 } from "@/lib/v1Api";
 import { useAuth } from "@/hooks/useAuth";
@@ -100,7 +99,7 @@ function LockCard({ label, hint }: { label: string; hint?: string }) {
         <div>
           <div style={{ color: COLORS.text, fontWeight: 600, fontSize: "14px" }}>{label}</div>
           <div style={{ color: COLORS.muted, fontSize: "12px" }}>
-            {hint ?? "Unlock with a SolveX Premium token."}
+            {hint ?? "Unlock with the Premium plan on your SolveX account."}
           </div>
         </div>
       </div>
@@ -130,7 +129,6 @@ function PanelTitle({ title, subtitle }: { title: string; subtitle?: string }) {
 export function V1TrainingPanel({ handle }: { handle: string }) {
   const auth = useAuth();
   const accountId = auth.status === "signed_in" ? auth.user?.user_id ?? null : null;
-  const [tokenInput, setTokenInput] = useState("");
   const [planState, setPlanState] = useState<{ accountId: string; value: string } | null>(null);
   const plan = planState?.accountId === accountId ? planState.value : "free";
   const [phase, setPhase] = useState<"idle" | "syncing" | "analyzing" | "queueing" | "done" | "error">("idle");
@@ -159,31 +157,10 @@ export function V1TrainingPanel({ handle }: { handle: string }) {
   }, [accountId]);
 
   useEffect(() => {
-    // localStorage is client-only: hydrate the token after mount (a lazy
-    // useState initializer would mismatch the server-rendered value).
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setTokenInput(getApiToken());
-  }, []);
-
-  useEffect(() => {
     // The state update happens only after the entitlement request resolves.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void refreshPlan();
   }, [refreshPlan]);
-
-  const saveToken = async () => {
-    setApiToken(tokenInput);
-    await auth.refresh();
-    // Server-shaped responses depend on the plan — clear stale views.
-    setWeakness(null);
-    setQueue(null);
-    setPlan7(null);
-    setPlan14State(null);
-    setPlan14Gate("");
-    setWeeklyState(null);
-    setWeeklyGate("");
-    setPhase("idle");
-  };
 
   const runV1 = useCallback(async () => {
     setError("");
@@ -220,7 +197,7 @@ export function V1TrainingPanel({ handle }: { handle: string }) {
     } catch (err) {
       if (getApiToken() !== requestedToken) return;
       if (err instanceof V1ApiError && err.isPremiumGate) {
-        setPlan14Gate("The 14-day plan is a Premium feature. Enter your Premium token above to unlock it.");
+        setPlan14Gate("The 14-day plan is a Premium feature for your signed-in SolveX account.");
       } else {
         setPlan14Gate(err instanceof Error ? err.message : "Could not load the 14-day plan.");
       }
@@ -254,7 +231,7 @@ export function V1TrainingPanel({ handle }: { handle: string }) {
     } catch (err) {
       if (getApiToken() !== requestedToken) return;
       if (err instanceof V1ApiError && err.isPremiumGate) {
-        setWeeklyGate("The weekly progress report is a Premium feature. Enter your Premium token above to unlock it.");
+        setWeeklyGate("The weekly progress report is a Premium feature for your signed-in SolveX account.");
       } else {
         setWeeklyGate(err instanceof Error ? err.message : "Could not load the weekly report.");
       }
@@ -287,7 +264,7 @@ export function V1TrainingPanel({ handle }: { handle: string }) {
         </p>
       </div>
 
-      {/* Token + plan row */}
+      {/* Account + plan row */}
       <Card style={{ marginBottom: "18px" }}>
         <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", alignItems: "center" }}>
           <span
@@ -300,34 +277,44 @@ export function V1TrainingPanel({ handle }: { handle: string }) {
           >
             {plan.replaceAll("_", " ")}
           </span>
-          <input
-            type="password"
-            value={tokenInput}
-            onChange={(e) => setTokenInput(e.target.value)}
-            placeholder="Premium API token (optional)"
-            autoComplete="off"
-            style={{
-              flex: "1 1 220px", minWidth: "180px", padding: "8px 12px", fontSize: "13px",
-              background: "#020806", color: COLORS.text,
-              border: `1px solid ${COLORS.border}`, borderRadius: "8px", outline: "none",
-            }}
-          />
-          <button
-            onClick={saveToken}
-            style={{
-              padding: "8px 14px", fontSize: "13px", fontWeight: 600, cursor: "pointer",
-              background: "transparent", color: COLORS.mint,
-              border: `1px solid ${COLORS.mint}`, borderRadius: "8px",
-            }}
-          >
-            Save token
-          </button>
+          <span style={{ flex: "1 1 220px", fontSize: "12px", color: COLORS.muted }}>
+            {auth.status === "signed_in"
+              ? auth.user?.handle_verified
+                ? `Signed in · Codeforces @${auth.user.handle} connected`
+                : "Signed in · Connect your Codeforces account for personalized progress and PvP"
+              : "Public analysis is available. Sign in for private training and progress tracking."}
+          </span>
+          {auth.status === "signed_in" ? (
+            <button
+              type="button"
+              onClick={() => void auth.signOut()}
+              style={{
+                padding: "8px 14px", fontSize: "13px", fontWeight: 600, cursor: "pointer",
+                background: "transparent", color: COLORS.muted,
+                border: `1px solid ${COLORS.border}`, borderRadius: "8px",
+              }}
+            >
+              Sign out
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => void auth.signIn()}
+              style={{
+                padding: "8px 14px", fontSize: "13px", fontWeight: 600, cursor: "pointer",
+                background: "transparent", color: COLORS.mint,
+                border: `1px solid ${COLORS.mint}`, borderRadius: "8px",
+              }}
+            >
+              Sign in
+            </button>
+          )}
           <button
             onClick={runV1}
-            disabled={busy}
+            disabled={busy || auth.status !== "signed_in"}
             style={{
               padding: "8px 16px", fontSize: "13px", fontWeight: 700,
-              cursor: busy ? "default" : "pointer",
+              cursor: busy || auth.status !== "signed_in" ? "default" : "pointer",
               background: busy ? "rgba(0,245,160,0.25)" : COLORS.mint,
               color: busy ? COLORS.muted : "#020806",
               border: "none", borderRadius: "8px",

@@ -8,6 +8,7 @@ import { V1ApiError, fetchLegacyAnalysis } from "@/lib/v1Api";
 import { V1TrainingPanel } from "@/components/analyze/V1TrainingPanel";
 import { GamificationWidget } from "@/components/analyze/GamificationWidget";
 import { PrivateLeaderboardSection } from "@/components/analyze/PrivateLeaderboardSection";
+import { PvPCallout } from "@/components/analyze/PvPCallout";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -884,6 +885,7 @@ function Dashboard({ data }: { data: AnalysisResult }) {
 
       {/* v1 training engine (weakness map, daily queue, plans, weekly report) */}
       <div className="tx-rise tx-rise-6">
+        <PvPCallout />
         <GamificationWidget handle={data.handle} />
         <PrivateLeaderboardSection handle={data.handle} />
         <V1TrainingPanel handle={data.handle} />

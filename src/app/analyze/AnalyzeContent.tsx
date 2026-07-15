@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import type { AnalysisResult, FrictionArea, QueueDay } from "@/lib/cfAnalysis";
+import type { AnalysisResult, FrictionArea, QueueDay, RecommendedProblem } from "@/lib/cfAnalysis";
 import { V1ApiError, fetchLegacyAnalysis } from "@/lib/v1Api";
 import { V1TrainingPanel } from "@/components/analyze/V1TrainingPanel";
 import { GamificationWidget } from "@/components/analyze/GamificationWidget";
@@ -34,6 +34,90 @@ function rankColor(rank: string): string {
 function cfProblemLink(contestId?: number, index?: string): string | null {
   if (!contestId || !index) return null;
   return `https://codeforces.com/problemset/problem/${contestId}/${index}`;
+}
+
+function capitalizeTag(tag: string): string {
+  return tag.split(" ").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+}
+
+// Friction intensity: same 0–100 visual scaling used for the bar and the
+// top summary card, kept in one place so both stay in sync.
+function frictionIntensityPct(frictionScore: number): number {
+  return Math.min(Math.round(frictionScore * 1.8), 100);
+}
+
+// `confidence` reflects how many problems were attempted in this topic
+// (see backend legacy_compat.py), not how severe the friction is. Labeling
+// it plainly as "evidence" avoids reading as a contradictory severity tag
+// next to a high friction-intensity percentage.
+const EVIDENCE_LABEL: Record<FrictionArea["confidence"], string> = {
+  high: "High evidence",
+  medium: "Medium evidence",
+  low: "Low evidence",
+};
+
+function evidenceTooltip(area: FrictionArea): string {
+  return `Evidence level, not severity — based on ${area.attempted} problem${area.attempted === 1 ? "" : "s"} attempted in this topic. More attempts means a more reliable pattern.`;
+}
+
+// Short, deterministic explanation built only from fields already on the
+// FrictionArea — no invented numbers.
+function frictionExplanation(area: FrictionArea): string {
+  const allSolved = area.attempted > 0 && area.solved === area.attempted;
+
+  if (allSolved && area.avgAttemptsBeforeAC > 1.5) {
+    return `Solved all ${area.attempted}, but needed ${area.avgAttemptsBeforeAC.toFixed(1)} attempts on average.`;
+  }
+  if (area.attempted > area.solved && area.waCount > 0 && area.waCount >= area.tleCount) {
+    return "High WA density suggests weak edge-case coverage.";
+  }
+  if (area.attempted > area.solved) {
+    const unresolved = area.attempted - area.solved;
+    return `${unresolved} of ${area.attempted} attempted problem${area.attempted === 1 ? "" : "s"} ${unresolved === 1 ? "is" : "are"} still unsolved.`;
+  }
+  if (area.tleCount > 0 && area.tleCount >= area.waCount) {
+    return "Frequent timeouts point to complexity or optimization gaps.";
+  }
+  return "Most mistakes happen before reaching a clean accepted solution.";
+}
+
+// Topic-aware practice copy, replacing the old one-size-fits-all
+// "Practice systematic edge-case testing" text that repeated on every card.
+const TOPIC_RECOMMENDATIONS: Record<string, string> = {
+  "shortest paths": "Practice graph distance edge cases",
+  "games": "Practice winning states and transitions",
+  "schedules": "Practice interval ordering and boundary cases",
+  "constructive algorithms": "Practice invariant-based construction",
+  "dp": "Practice state definitions and transitions",
+  "dynamic programming": "Practice state definitions and transitions",
+  "math": "Practice formula derivation and boundary cases",
+  "greedy": "Practice exchange arguments and counterexamples",
+  "data structures": "Practice update/query invariants",
+  "trees": "Practice parent-child state transitions",
+  "strings": "Practice pattern and boundary cases",
+  "graphs": "Practice traversal and connectivity edge cases",
+  "binary search": "Practice monotonicity and boundary conditions",
+  "two pointers": "Practice window invariants and boundary shifts",
+  "number theory": "Practice modular arithmetic and divisibility cases",
+  "combinatorics": "Practice counting setups and overcounting checks",
+  "geometry": "Practice precision and boundary configurations",
+  "brute force": "Practice pruning and complexity bounds",
+  "implementation": "Practice careful step-by-step tracing",
+  "dfs and similar": "Practice traversal order and state tracking",
+  "sorting": "Practice comparator correctness and stability",
+  "sortings": "Practice comparator correctness and stability",
+  "bitmasks": "Practice state encoding and transition bits",
+};
+
+function topicRecommendation(tag: string): string {
+  return TOPIC_RECOMMENDATIONS[tag.toLowerCase()] ?? "Practice targeted problems for this topic";
+}
+
+// The CF tag (if any) that ties a recommended problem back to a friction
+// area — mirrors the backend's own friction_tag derivation.
+function primaryFrictionTag(problem: RecommendedProblem, frictionTags: Set<string>): string | null {
+  const match = problem.tags.find((t) => frictionTags.has(t.toLowerCase()));
+  return match ?? problem.tags[0] ?? null;
 }
 
 // ─── Skeleton loader ──────────────────────────────────────────────────────────
@@ -317,11 +401,19 @@ function SummaryCards({ data }: { data: AnalysisResult }) {
     errorBreakdown.memoryLimitExceeded +
     errorBreakdown.other;
 
+  const topFriction = data.frictionAreas[0];
+  const { min, max, sweet } = data.ratingComfortZone;
+
   const cards = [
-    { label: "Total submissions",   value: summary.totalSubmissions.toLocaleString(), sub: `${totalErrors} non-AC verdicts` },
-    { label: "Unique solved",       value: summary.uniqueSolved.toLocaleString(),       sub: `avg ${summary.avgSolvedRating} rating solved` },
-    { label: "Friction areas",      value: data.frictionAreas.length,                  sub: "tags with high retry cost" },
-    { label: "Primary language",    value: summary.mainLanguage,                        sub: "most used in AC submissions" },
+    { label: "Total solved",         value: summary.uniqueSolved.toLocaleString(),       sub: `avg ${summary.avgSolvedRating} rating solved` },
+    { label: "Total submissions",    value: summary.totalSubmissions.toLocaleString(),   sub: "across full history" },
+    { label: "Non-AC verdicts",      value: totalErrors.toLocaleString(),                sub: `${pctOf(totalErrors, summary.totalSubmissions)}% of submissions` },
+    {
+      label: "Highest-friction topic",
+      value: topFriction ? capitalizeTag(topFriction.tag) : "None yet",
+      sub: topFriction ? `${frictionIntensityPct(topFriction.frictionScore)}% friction intensity` : "no strong friction pattern detected",
+    },
+    { label: "Suggested training range", value: `${min}–${max}`, sub: `sweet spot ${sweet} rating` },
   ];
 
   return (
@@ -380,12 +472,22 @@ function DiagnosisBanner({ text }: { text: string }) {
 
 // ─── Friction area card ───────────────────────────────────────────────────────
 
-function FrictionCard({ area }: { area: FrictionArea }) {
-  const barPct = Math.min(Math.round(area.frictionScore * 1.8), 100); // visual only
+function FrictionCard({
+  area,
+  hasQueueMatch,
+  onPractice,
+}: {
+  area: FrictionArea;
+  hasQueueMatch: boolean;
+  onPractice: (tag: string) => void;
+}) {
+  const barPct = frictionIntensityPct(area.frictionScore);
+  const explanation = frictionExplanation(area);
+  const recommendation = topicRecommendation(area.tag);
 
   return (
     <div className="tx-card" style={{ padding: "24px", borderTop: `3px solid ${area.color}` }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "8px", marginBottom: "16px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "8px", marginBottom: "14px" }}>
         <div>
           <h3
             style={{
@@ -393,7 +495,7 @@ function FrictionCard({ area }: { area: FrictionArea }) {
               letterSpacing: "-0.02em", marginBottom: "6px",
             }}
           >
-            {area.tag.split(" ").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ")}
+            {capitalizeTag(area.tag)}
           </h3>
           <div style={{ display: "flex", gap: "5px", flexWrap: "wrap" }}>
             {[
@@ -414,15 +516,18 @@ function FrictionCard({ area }: { area: FrictionArea }) {
             ))}
           </div>
         </div>
+        {/* Evidence badge — how much data backs this pattern, not how severe it is.
+            Deliberately neutral (not area.color) so it never reads as a severity tag. */}
         <span
+          title={evidenceTooltip(area)}
           style={{
-            fontSize: "10px", fontWeight: 700, color: area.color,
-            background: `${area.color}12`, border: `1px solid ${area.color}28`,
+            fontSize: "10px", fontWeight: 700, color: "#8A9A96",
+            background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)",
             borderRadius: "9999px", padding: "3px 10px",
-            textTransform: "uppercase", letterSpacing: "0.06em", flexShrink: 0,
+            letterSpacing: "0.02em", flexShrink: 0, cursor: "help",
           }}
         >
-          {area.confidence}
+          {EVIDENCE_LABEL[area.confidence]}
         </span>
       </div>
 
@@ -430,13 +535,13 @@ function FrictionCard({ area }: { area: FrictionArea }) {
       <div
         style={{
           display: "grid", gridTemplateColumns: "1fr 1fr 1fr",
-          gap: "10px", marginBottom: "18px",
+          gap: "10px", marginBottom: "14px",
         }}
       >
         {[
-          { label: "Solved",    value: `${area.solved}/${area.attempted}` },
-          { label: "Subs",      value: area.totalSubmissions },
-          { label: "Avg tries", value: area.avgAttemptsBeforeAC },
+          { label: "Solved problems", value: `${area.solved}/${area.attempted}` },
+          { label: "Submissions",     value: area.totalSubmissions },
+          { label: "Avg attempts",    value: area.avgAttemptsBeforeAC },
         ].map((s) => (
           <div key={s.label}>
             <div style={{ fontSize: "14px", fontWeight: 700, color: "#F4F7F6", letterSpacing: "-0.01em" }}>
@@ -447,29 +552,68 @@ function FrictionCard({ area }: { area: FrictionArea }) {
         ))}
       </div>
 
+      {/* Explanation sentence — what the numbers above actually mean */}
+      <p style={{ fontSize: "12.5px", color: "#c8d4d0", lineHeight: "18px", margin: "0 0 16px" }}>
+        {explanation}
+      </p>
+
       {/* Friction bar */}
       <div style={{ marginBottom: "16px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "5px" }}>
-          <span style={{ fontSize: "11px", color: "#8A9A96" }}>Friction intensity</span>
+          <span
+            title="Combines wrong-answer rate, timeouts, and retries before AC into one 0–100 score for this topic."
+            style={{ fontSize: "11px", color: "#8A9A96", cursor: "help" }}
+          >
+            Friction intensity
+          </span>
           <span style={{ fontSize: "11px", fontWeight: 600, color: area.color }}>{barPct}%</span>
         </div>
         <div style={{ height: "4px", background: "rgba(255,255,255,0.06)", borderRadius: "4px", overflow: "hidden" }}>
           <div className="tx-bar-grow" style={{ height: "100%", width: `${barPct}%`, background: area.color, borderRadius: "4px" }} />
         </div>
+        <div style={{ fontSize: "10.5px", color: "#5b6d68", marginTop: "5px", lineHeight: "15px" }}>
+          How much this topic costs you in wrong attempts and retries before AC.
+        </div>
       </div>
 
-      {/* Action */}
+      {/* Topic-aware recommendation copy */}
       <div
         style={{
           background: "rgba(0,245,160,0.04)", border: "1px solid rgba(0,245,160,0.1)",
-          borderRadius: "8px", padding: "10px 14px",
+          borderRadius: "8px", padding: "10px 14px", marginBottom: "12px",
           fontSize: "12.5px", color: "#00F5A0",
           display: "flex", alignItems: "flex-start", gap: "8px", lineHeight: "18px",
         }}
       >
         <span style={{ flexShrink: 0 }}>→</span>
-        <span>{area.action}</span>
+        <span>{recommendation}</span>
       </div>
+
+      {/* Practice CTA — scrolls to and filters the retry queue for this topic */}
+      {hasQueueMatch ? (
+        <button
+          type="button"
+          onClick={() => onPractice(area.tag)}
+          className="tx-press"
+          style={{
+            width: "100%", display: "flex", alignItems: "center", justifyContent: "center",
+            gap: "6px", fontSize: "12.5px", fontWeight: 700, color: "#020806",
+            background: "#00F5A0", border: "none", borderRadius: "9999px",
+            padding: "9px 14px", cursor: "pointer",
+          }}
+        >
+          View recommended problems →
+        </button>
+      ) : (
+        <span
+          style={{
+            display: "block", textAlign: "center", fontSize: "12px", color: "#5b6d68",
+            border: "1px solid rgba(255,255,255,0.08)", borderRadius: "9999px", padding: "8px 14px",
+          }}
+        >
+          No queued problems for this topic yet
+        </span>
+      )}
     </div>
   );
 }
@@ -554,8 +698,28 @@ function RatingComfortZone({ data }: { data: AnalysisResult }) {
       >
         {min} – {max}
       </div>
-      <div style={{ fontSize: "13px", color: "#8A9A96", marginBottom: "20px" }}>
+      <div style={{ fontSize: "13px", color: "#8A9A96", marginBottom: "12px" }}>
         Sweet spot: <span style={{ color: "#F4F7F6", fontWeight: 600 }}>{sweet}</span> rating
+      </div>
+
+      <p style={{ fontSize: "12.5px", color: "#c8d4d0", lineHeight: "18px", margin: "0 0 18px" }}>
+        Your best training range is where problems are hard enough to expose mistakes, but still realistic to solve.
+      </p>
+
+      {/* Legend — ties the ladder colors below to plain-language zones,
+          derived only from the min/max/sweet already returned by the API. */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "12px", marginBottom: "14px" }}>
+        {[
+          { label: "Too easy",    swatch: "rgba(255,255,255,0.12)" },
+          { label: "Comfort zone", swatch: "rgba(0,245,160,0.35)" },
+          { label: "Sweet spot",  swatch: "#00F5A0" },
+          { label: "Too hard",    swatch: "rgba(255,255,255,0.12)" },
+        ].map((l) => (
+          <div key={l.label} style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+            <span style={{ width: "8px", height: "8px", borderRadius: "2px", background: l.swatch, flexShrink: 0, display: "inline-block" }} />
+            <span style={{ fontSize: "11px", color: "#8A9A96" }}>{l.label}</span>
+          </div>
+        ))}
       </div>
 
       {/* Mini rating ladder */}
@@ -613,7 +777,7 @@ function StrongTopics({ data }: { data: AnalysisResult }) {
               }}
             />
             <span style={{ fontSize: "13.5px", color: "#F4F7F6", flex: 1 }}>
-              {t.tag.split(" ").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ")}
+              {capitalizeTag(t.tag)}
             </span>
             <span style={{ fontSize: "12px", color: "#8A9A96" }}>
               {t.solved} solved · {Math.round(t.solveRate * 100)}% AC
@@ -627,7 +791,77 @@ function StrongTopics({ data }: { data: AnalysisResult }) {
 
 // ─── Recommended problems ─────────────────────────────────────────────────────
 
-function RecommendedProblems({ data }: { data: AnalysisResult }) {
+function TopicFilterBar({
+  topics,
+  active,
+  onSelect,
+}: {
+  topics: string[];
+  active: string | null;
+  onSelect: (tag: string | null) => void;
+}) {
+  if (topics.length === 0) return null;
+
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "8px", marginBottom: "18px" }}>
+      {active && (
+        <span
+          style={{
+            display: "inline-flex", alignItems: "center", gap: "8px",
+            fontSize: "12.5px", color: "#8A9A96",
+            background: "rgba(0,245,160,0.06)", border: "1px solid rgba(0,245,160,0.18)",
+            borderRadius: "9999px", padding: "5px 8px 5px 14px",
+          }}
+        >
+          Showing problems for: <strong style={{ color: "#F4F7F6", fontWeight: 600 }}>{capitalizeTag(active)}</strong>
+          <button
+            type="button"
+            onClick={() => onSelect(null)}
+            aria-label="Clear topic filter"
+            style={{
+              display: "flex", alignItems: "center", justifyContent: "center",
+              width: "18px", height: "18px", borderRadius: "50%",
+              border: "none", background: "rgba(255,255,255,0.1)", color: "#F4F7F6",
+              fontSize: "12px", lineHeight: 1, cursor: "pointer",
+            }}
+          >
+            ×
+          </button>
+        </span>
+      )}
+      {topics.map((tag) => {
+        const isActive = active?.toLowerCase() === tag.toLowerCase();
+        return (
+          <button
+            key={tag}
+            type="button"
+            onClick={() => onSelect(isActive ? null : tag)}
+            className="tx-press"
+            style={{
+              fontSize: "12px", fontWeight: 600, borderRadius: "9999px",
+              padding: "5px 14px", cursor: "pointer",
+              border: `1px solid ${isActive ? "rgba(0,245,160,0.5)" : "rgba(255,255,255,0.1)"}`,
+              background: isActive ? "rgba(0,245,160,0.12)" : "transparent",
+              color: isActive ? "#00F5A0" : "#8A9A96",
+            }}
+          >
+            {capitalizeTag(tag)}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function RecommendedProblems({
+  data,
+  topicFilter,
+  onSelectTopic,
+}: {
+  data: AnalysisResult;
+  topicFilter: string | null;
+  onSelectTopic: (tag: string | null) => void;
+}) {
   if (data.recommendedProblems.length === 0) {
     return (
       <div className="tx-card" style={{ padding: "28px", textAlign: "center", color: "#8A9A96", fontSize: "14px" }}>
@@ -636,87 +870,115 @@ function RecommendedProblems({ data }: { data: AnalysisResult }) {
     );
   }
 
-  return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(auto-fit,minmax(240px,1fr))",
-        gap: "10px",
-      }}
-    >
-      {data.recommendedProblems.map((p, i) => {
-        const link = cfProblemLink(p.contestId, p.index);
+  const frictionTagSet = new Set(data.frictionAreas.map((a) => a.tag.toLowerCase()));
+  const topics = Array.from(
+    new Set(
+      data.recommendedProblems
+        .map((p) => primaryFrictionTag(p, frictionTagSet))
+        .filter((t): t is string => Boolean(t))
+    )
+  );
 
-        return (
-          <div key={i}>
-            <div
-              className="tx-card"
-              style={{
-                padding: "14px 16px",
-                display: "flex", alignItems: "center", justifyContent: "space-between",
-                gap: "12px",
-              }}
-            >
-              <div style={{ minWidth: 0 }}>
-                {link ? (
-                  <a
-                    href={link}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{
-                      display: "block", fontSize: "13px", fontWeight: 600, color: "#F4F7F6",
-                      letterSpacing: "-0.01em", marginBottom: "3px", textDecoration: "none",
-                      whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-                    }}
-                  >
-                    {p.name}
-                  </a>
-                ) : (
+  const filtered = topicFilter
+    ? data.recommendedProblems.filter((p) => p.tags.some((t) => t.toLowerCase() === topicFilter.toLowerCase()))
+    : data.recommendedProblems;
+
+  return (
+    <div>
+      <TopicFilterBar topics={topics} active={topicFilter} onSelect={onSelectTopic} />
+
+      {filtered.length === 0 ? (
+        <div className="tx-card" style={{ padding: "28px", textAlign: "center", color: "#8A9A96", fontSize: "14px" }}>
+          No queued problems tagged &ldquo;{capitalizeTag(topicFilter ?? "")}&rdquo; right now.
+        </div>
+      ) : (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit,minmax(260px,1fr))",
+            gap: "10px",
+          }}
+        >
+          {filtered.map((p, i) => {
+            // Arena only renders a fixed sample problem outside duel mode
+            // (see ArenaLayout.tsx) — an "Open in Arena" link here would be
+            // a second dead-end, so the working action is the real CF page.
+            const cfLink = cfProblemLink(p.contestId, p.index);
+            const tag = primaryFrictionTag(p, frictionTagSet);
+
+            return (
+              <div
+                key={i}
+                className="tx-card"
+                style={{ padding: "16px 18px", display: "flex", flexDirection: "column", gap: "8px" }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "10px" }}>
                   <div
                     style={{
-                      fontSize: "13px", fontWeight: 600, color: "#F4F7F6",
-                      letterSpacing: "-0.01em", marginBottom: "3px",
-                      whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                      fontSize: "13.5px", fontWeight: 600, color: "#F4F7F6",
+                      letterSpacing: "-0.01em", lineHeight: "18px", minWidth: 0,
                     }}
                   >
                     {p.name}
                   </div>
+                  <span
+                    style={{
+                      fontSize: "12px", fontWeight: 700, color: "#00F5A0",
+                      background: "rgba(0,245,160,0.08)", borderRadius: "6px",
+                      padding: "3px 8px", fontFamily: "ui-monospace, monospace",
+                      flexShrink: 0,
+                    }}
+                  >
+                    {p.rating}
+                  </span>
+                </div>
+
+                {tag && (
+                  <button
+                    type="button"
+                    onClick={() => onSelectTopic(topicFilter?.toLowerCase() === tag.toLowerCase() ? null : tag)}
+                    style={{
+                      alignSelf: "flex-start", fontSize: "11px", fontWeight: 600,
+                      color: "#8A9A96", background: "rgba(255,255,255,0.05)",
+                      border: "1px solid rgba(255,255,255,0.1)", borderRadius: "9999px",
+                      padding: "2px 10px", cursor: "pointer",
+                    }}
+                  >
+                    {capitalizeTag(tag)}
+                  </button>
                 )}
-                <div style={{ fontSize: "11px", color: "#8A9A96", lineHeight: "16px" }}>
+
+                <div style={{ fontSize: "11.5px", color: "#8A9A96", lineHeight: "17px" }}>
                   {p.reason}
                 </div>
-              </div>
-              <div style={{ flexShrink: 0, textAlign: "right", display: "flex", flexDirection: "column", gap: "4px", alignItems: "flex-end" }}>
-                <span
-                  style={{
-                    fontSize: "12px", fontWeight: 700, color: "#00F5A0",
-                    background: "rgba(0,245,160,0.08)", borderRadius: "6px",
-                    padding: "3px 8px", fontFamily: "ui-monospace, monospace",
-                  }}
-                >
-                  {p.rating}
-                </span>
-                {p.contestId && p.index && (
-                  <Link
-                    href={`/arena?problem=${p.contestId}${p.index}`}
+
+                {cfLink ? (
+                  <a
+                    href={cfLink}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="tx-press"
                     style={{
-                      fontSize: "10px", fontFamily: "ui-monospace, monospace",
+                      display: "inline-flex", alignItems: "center", justifyContent: "center",
+                      gap: "5px", fontSize: "12px", fontWeight: 700,
                       color: "#00F5A0", textDecoration: "none",
                       border: "1px solid rgba(0,245,160,0.25)",
-                      borderRadius: "4px", padding: "2px 7px",
-                      transition: "background 0.15s",
-                      display: "inline-block",
+                      borderRadius: "9999px", padding: "6px 14px",
+                      marginTop: "2px",
                     }}
-                    onClick={(e) => e.stopPropagation()}
                   >
-                    Solve →
-                  </Link>
+                    Open on Codeforces →
+                  </a>
+                ) : (
+                  <span style={{ fontSize: "11.5px", color: "#5b6d68", marginTop: "2px" }}>
+                    Link unavailable
+                  </span>
                 )}
               </div>
-            </div>
-          </div>
-        );
-      })}
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -816,6 +1078,20 @@ function QueueTable({ queue }: { queue: QueueDay[] }) {
 // ─── Full dashboard ───────────────────────────────────────────────────────────
 
 function Dashboard({ data }: { data: AnalysisResult }) {
+  const [topicFilter, setTopicFilter] = useState<string | null>(null);
+
+  // Tags actually covered by the retry queue, so a friction card's CTA only
+  // offers to jump there when there's something real to show.
+  const queueTagSet = useMemo(
+    () => new Set(data.recommendedProblems.flatMap((p) => p.tags.map((t) => t.toLowerCase()))),
+    [data.recommendedProblems]
+  );
+
+  function practiceTopic(tag: string) {
+    setTopicFilter(tag);
+    document.getElementById("retry-queue-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
   return (
     <div style={{ maxWidth: "1100px", margin: "0 auto", padding: "0 24px 100px" }}>
       <div className="tx-rise"><ProfileBar data={data} /></div>
@@ -838,7 +1114,12 @@ function Dashboard({ data }: { data: AnalysisResult }) {
             }}
           >
             {data.frictionAreas.map((area) => (
-              <FrictionCard key={area.tag} area={area} />
+              <FrictionCard
+                key={area.tag}
+                area={area}
+                hasQueueMatch={queueTagSet.has(area.tag.toLowerCase())}
+                onPractice={practiceTopic}
+              />
             ))}
           </div>
         </section>
@@ -863,13 +1144,13 @@ function Dashboard({ data }: { data: AnalysisResult }) {
 
       {/* Recommended problems */}
       {data.recommendedProblems.length > 0 && (
-        <section style={{ marginBottom: "48px" }} className="tx-rise tx-rise-5">
+        <section id="retry-queue-section" style={{ marginBottom: "48px", scrollMarginTop: "72px" }} className="tx-rise tx-rise-5">
           <SectionTitle
             badge="Retry queue"
             title="Problems to revisit"
             subtitle="Unresolved or high-retry problems from your own history, targeting your friction areas."
           />
-          <RecommendedProblems data={data} />
+          <RecommendedProblems data={data} topicFilter={topicFilter} onSelectTopic={setTopicFilter} />
         </section>
       )}
 

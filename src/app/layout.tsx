@@ -22,9 +22,15 @@ const rebondGrotesque = localFont({
 
 export const metadata: Metadata = {
   title: "SolveX · Codeforces Performance Intelligence",
-  description: "SolveX analyzes your public Codeforces submissions to detect friction areas, find blind spots, and generate a focused 7-day training plan. No login required.",
-  icons: {
-    icon: "/seo/favicon-light.png",
+  description:
+    "SolveX turns public Codeforces history into weak-topic diagnosis, retry patterns, and focused training plans.",
+  applicationName: "SolveX",
+  openGraph: {
+    title: "SolveX · Codeforces Performance Intelligence",
+    description:
+      "SolveX turns public Codeforces history into weak-topic diagnosis, retry patterns, and focused training plans.",
+    siteName: "SolveX",
+    type: "website",
   },
 };
 

@@ -21,7 +21,6 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import Link from "next/link";
 import {
   GamificationBadge,
   GamificationSnapshot,
@@ -633,26 +632,6 @@ export function GamificationWidget({ handle }: { handle: string }) {
         </SectionCard>
       )}
 
-      <div style={{ marginTop: "10px" }}>
-        <Link
-          href="/duels"
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: "6px",
-            fontSize: "12px",
-            fontWeight: 600,
-            color: COLORS.cyan,
-            textDecoration: "none",
-            padding: "8px 12px",
-            borderRadius: "8px",
-            border: `1px solid ${COLORS.border}`,
-            background: COLORS.bg,
-          }}
-        >
-          Friend 1v1 duels →
-        </Link>
-      </div>
     </div>
   );
 }

@@ -326,9 +326,6 @@ export function V1TrainingPanel({ handle }: { handle: string }) {
             {!busy && (phase === "done" ? "Re-run deep analysis" : "Run deep analysis")}
           </button>
         </div>
-        <p style={{ fontSize: "11px", color: COLORS.muted, marginTop: "8px" }}>
-          Tokens are issued by the SolveX team with Premium access and stored only in this browser.
-        </p>
       </Card>
 
       {error && (

@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { LoaderCircle } from "lucide-react";
 import type React from "react";
 
 /* ─── Star positions (static — avoids SSR/client mismatch) ─── */
@@ -495,15 +497,19 @@ function HeroProductPreview() {
 
 /* ─── HeroSection ─── */
 export function HeroSection() {
-  const [handle, setHandle] = useState("");
-  const [error, setError]   = useState("");
+  const router = useRouter();
+  const [handle, setHandle]         = useState("");
+  const [error, setError]           = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (submitting) return;
     const trimmed = handle.trim();
-    if (!trimmed) { setError("Please enter a Codeforces handle."); return; }
+    if (!trimmed) { setError("Enter a Codeforces handle to analyze."); return; }
     setError("");
-    window.location.href = `/analyze?handle=${encodeURIComponent(trimmed)}`;
+    setSubmitting(true);
+    router.push(`/analyze?handle=${encodeURIComponent(trimmed)}`);
   }
 
   return (
@@ -711,7 +717,7 @@ export function HeroSection() {
             marginBottom: "14px",
           }}
         >
-          <div className="hero-input-pill">
+          <div className={`hero-input-pill${error ? " hero-input-pill-error" : ""}`}>
             <input
               type="text"
               value={handle}
@@ -720,7 +726,10 @@ export function HeroSection() {
               className="hero-input-inner"
               autoComplete="off"
               spellCheck={false}
+              disabled={submitting}
               aria-label="Codeforces handle"
+              aria-invalid={Boolean(error)}
+              aria-describedby={error ? "hero-handle-error" : undefined}
             />
             <div className="glow-wrap">
               <div className="glow-animations">
@@ -728,12 +737,21 @@ export function HeroSection() {
                 <div className="glow-stars-masker"><div className="glow-stars" /></div>
               </div>
               <div className="glow-content">
-                <button type="submit" className="hero-cta-btn">Analyze profile</button>
+                <button type="submit" className="hero-cta-btn" disabled={submitting}>
+                  {submitting ? (
+                    <>
+                      <LoaderCircle size={15} strokeWidth={2.5} className="hero-cta-spinner" aria-hidden="true" />
+                      Analyzing…
+                    </>
+                  ) : (
+                    "Analyze profile"
+                  )}
+                </button>
               </div>
             </div>
           </div>
           {error && (
-            <span style={{ fontSize: "13px", color: "#FF4D6D", animation: "tx-hero-rise 0.25s ease both" }}>
+            <span id="hero-handle-error" role="alert" className="hero-input-error-msg">
               {error}
             </span>
           )}

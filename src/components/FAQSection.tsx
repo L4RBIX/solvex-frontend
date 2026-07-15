@@ -34,7 +34,7 @@ const FAQ_ITEMS = [
   },
   {
     question: "Who built SolveX?",
-    answer: "SolveX is built by Bekarys Kydyrbekov, a competitive programmer from Kazakhstan. It started as a personal tool to diagnose why rating gains stalled, and grew from there.",
+    answer: "SolveX is built by two young founders from Kazakhstan — Kydyrbek Bekarys and Shaimardan Yerbossyn — working on competitive programming, AI, and product building. It started as a personal tool to diagnose why rating gains stalled, and grew from there.",
   },
 ];
 
@@ -50,7 +50,7 @@ export default function FAQSection() {
             <h2 className="tx-h2" style={{ marginBottom: "16px" }}>Questions</h2>
             <p className="tx-subtitle">
               Still have a question?{" "}
-              <a href="mailto:solvex@example.com" style={{ color: "#00F5A0", textDecoration: "none" }}>
+              <a href="mailto:kydyrbekbekarys44@gmail.com?subject=SolveX%20question" style={{ color: "#00F5A0", textDecoration: "none" }}>
                 Email us.
               </a>
             </p>

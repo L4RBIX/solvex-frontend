@@ -285,8 +285,18 @@
 }
 
 .hero-input-pill:focus-within {
-  border-color: rgba(0, 245, 160, 0.5);
-  box-shadow: 0 0 0 3px rgba(0, 245, 160, 0.06);
+  border-color: rgba(0, 245, 160, 0.55);
+  background: rgba(0, 0, 0, 0.42);
+  box-shadow: 0 0 0 4px rgba(0, 245, 160, 0.07), 0 8px 32px rgba(0, 245, 160, 0.06);
+}
+
+.hero-input-pill-error {
+  border-color: rgba(255, 77, 109, 0.5);
+}
+
+.hero-input-pill-error:focus-within {
+  border-color: rgba(255, 77, 109, 0.65);
+  box-shadow: 0 0 0 4px rgba(255, 77, 109, 0.07);
 }
 
 .hero-input-inner {
@@ -298,10 +308,56 @@
   font-size: 15px;
   font-family: var(--font-inter), system-ui;
   min-width: 0;
+  height: 40px;
+}
+
+/* The pill carries the focus ring; the inner input must never draw its own.
+   Without this, the global input:focus-visible rule paints a rectangular
+   outline inside the rounded pill. */
+.hero-input-inner:focus,
+.hero-input-inner:focus-visible {
+  outline: none !important;
+  box-shadow: none;
+}
+
+.hero-input-inner:disabled {
+  opacity: 0.55;
 }
 
 .hero-input-inner::placeholder {
-  color: rgba(244, 247, 246, 0.32);
+  color: rgba(244, 247, 246, 0.42);
+}
+
+.hero-input-error-msg {
+  font-size: 13px;
+  color: #FF4D6D;
+  animation: tx-hero-rise 0.25s ease both;
+}
+
+/* Stack the pill on small screens so input and button never collide */
+@media (max-width: 520px) {
+  .hero-input-pill {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    padding: 8px;
+    border-radius: 24px;
+  }
+  .hero-input-inner {
+    width: 100%;
+    height: 44px;
+    padding: 0 14px;
+    text-align: center;
+  }
+  .hero-input-pill .glow-wrap {
+    display: block;
+    width: 100%;
+  }
+  .hero-input-pill .hero-cta-btn {
+    width: 100%;
+    padding-top: 13px;
+    padding-bottom: 13px;
+  }
 }
 
 /* =========================================
@@ -339,6 +395,22 @@
 .hero-cta-btn:active {
   transform: scale(0.97) translateY(0);
   box-shadow: none;
+}
+
+.hero-cta-btn:disabled {
+  cursor: default;
+  background: rgba(0, 245, 160, 0.75);
+  transform: none;
+  box-shadow: none;
+}
+
+.hero-cta-btn .hero-cta-spinner {
+  margin-right: 7px;
+  animation: tx-spin 0.8s linear infinite;
+}
+
+@keyframes tx-spin {
+  to { transform: rotate(360deg); }
 }
 
 /* =========================================
@@ -897,6 +969,9 @@
   .hero-enter {
     animation-duration: 0.001s !important;
     animation-delay: 0s !important;
+  }
+  .hero-input-error-msg {
+    animation: none !important;
   }
   .tx-navbar {
     animation: none !important;

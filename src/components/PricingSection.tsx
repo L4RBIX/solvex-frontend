@@ -25,7 +25,7 @@ const plans = [
     period: "for founding users",
     description: "For competitive programming clubs running group training.",
     cta: "Contact us",
-    ctaHref: "mailto:solvex@example.com",
+    ctaHref: "mailto:kydyrbekbekarys44@gmail.com?subject=SolveX%20Club%20Pilot",
     highlight: false,
     features: [
       "Everything in Free Beta",
@@ -133,38 +133,52 @@ export function PricingSection() {
                 </p>
               </div>
 
-              <a
-                href={plan.ctaHref}
-                style={{
-                  display: "block",
-                  textAlign: "center",
-                  padding: "11px 20px",
-                  borderRadius: "9999px",
-                  fontSize: "14px",
-                  fontWeight: 700,
-                  textDecoration: "none",
-                  marginBottom: "28px",
-                  transition: "background 0.2s, border-color 0.2s",
-                  letterSpacing: "-0.01em",
-                  ...(plan.highlight
-                    ? { background: "#00F5A0", color: "#020806" }
-                    : plan.comingSoon
-                    ? {
-                        background: "transparent",
-                        border: "1px solid rgba(255,255,255,0.08)",
-                        color: "rgba(255,255,255,0.3)",
-                        cursor: "default",
-                        pointerEvents: "none" as const,
-                      }
-                    : {
-                        background: "transparent",
-                        border: "1px solid rgba(0,245,160,0.28)",
-                        color: "#00F5A0",
-                      }),
-                }}
-              >
-                {plan.cta}
-              </a>
+              {plan.comingSoon ? (
+                <span
+                  aria-disabled="true"
+                  style={{
+                    display: "block",
+                    textAlign: "center",
+                    padding: "11px 20px",
+                    borderRadius: "9999px",
+                    fontSize: "14px",
+                    fontWeight: 700,
+                    marginBottom: "28px",
+                    letterSpacing: "-0.01em",
+                    background: "transparent",
+                    border: "1px solid rgba(255,255,255,0.08)",
+                    color: "rgba(255,255,255,0.3)",
+                    cursor: "default",
+                  }}
+                >
+                  {plan.cta}
+                </span>
+              ) : (
+                <a
+                  href={plan.ctaHref}
+                  style={{
+                    display: "block",
+                    textAlign: "center",
+                    padding: "11px 20px",
+                    borderRadius: "9999px",
+                    fontSize: "14px",
+                    fontWeight: 700,
+                    textDecoration: "none",
+                    marginBottom: "28px",
+                    transition: "background 0.2s, border-color 0.2s",
+                    letterSpacing: "-0.01em",
+                    ...(plan.highlight
+                      ? { background: "#00F5A0", color: "#020806" }
+                      : {
+                          background: "transparent",
+                          border: "1px solid rgba(0,245,160,0.28)",
+                          color: "#00F5A0",
+                        }),
+                  }}
+                >
+                  {plan.cta}
+                </a>
+              )}
 
               <div style={{ display: "flex", flexDirection: "column", gap: "11px" }}>
                 {plan.features.map((f) => (

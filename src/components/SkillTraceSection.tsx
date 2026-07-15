@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { Check } from "lucide-react";
 import { RevealOnScroll } from "@/components/animations/motion";
 
 const timelineSteps = [
@@ -63,13 +64,19 @@ export function SkillTraceSection() {
             <div style={{ display: "flex", flexDirection: "column", gap: "12px", marginBottom: "32px" }}>
               {features.map((f) => (
                 <div key={f} style={{ display: "flex", alignItems: "flex-start", gap: "10px" }}>
-                  <span style={{ color: "#00D9F5", fontSize: "14px", flexShrink: 0, lineHeight: "22px" }}>◆</span>
+                  <Check
+                    size={15}
+                    strokeWidth={2.25}
+                    color="#00D9F5"
+                    aria-hidden="true"
+                    style={{ flexShrink: 0, marginTop: "3.5px" }}
+                  />
                   <span style={{ fontSize: "14.5px", color: "#c8d4d0", lineHeight: "22px" }}>{f}</span>
                 </div>
               ))}
             </div>
             <a
-              href="#"
+              href="mailto:kydyrbekbekarys44@gmail.com?subject=SkillTrace%20waitlist"
               style={{
                 display: "inline-flex",
                 alignItems: "center",

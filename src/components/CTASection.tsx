@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { LoaderCircle } from "lucide-react";
 import type React from "react";
 import { RevealOnScroll } from "@/components/animations/motion";
 
@@ -69,14 +71,19 @@ function CTABackground() {
 }
 
 export default function CTASection() {
-  const [handle, setHandle] = useState("");
+  const router = useRouter();
+  const [handle, setHandle]         = useState("");
+  const [error, setError]           = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (submitting) return;
     const trimmed = handle.trim();
-    if (trimmed) {
-      window.location.href = `/analyze?handle=${encodeURIComponent(trimmed)}`;
-    }
+    if (!trimmed) { setError("Enter a Codeforces handle to analyze."); return; }
+    setError("");
+    setSubmitting(true);
+    router.push(`/analyze?handle=${encodeURIComponent(trimmed)}`);
   }
 
   return (
@@ -151,16 +158,30 @@ export default function CTASection() {
             Enter your Codeforces handle. Get a full friction analysis in seconds.
           </p>
 
-          <form onSubmit={handleSubmit} style={{ marginBottom: "16px" }}>
-            <div className="hero-input-pill">
+          <form
+            onSubmit={handleSubmit}
+            style={{
+              width: "100%",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: "8px",
+              marginBottom: "16px",
+            }}
+          >
+            <div className={`hero-input-pill${error ? " hero-input-pill-error" : ""}`}>
               <input
                 type="text"
                 value={handle}
-                onChange={(e) => setHandle(e.target.value)}
+                onChange={(e) => { setHandle(e.target.value); setError(""); }}
                 placeholder="Enter Codeforces handle"
                 className="hero-input-inner"
                 autoComplete="off"
                 spellCheck={false}
+                disabled={submitting}
+                aria-label="Codeforces handle"
+                aria-invalid={Boolean(error)}
+                aria-describedby={error ? "cta-handle-error" : undefined}
               />
               <div className="glow-wrap">
                 <div className="glow-animations">
@@ -168,10 +189,24 @@ export default function CTASection() {
                   <div className="glow-stars-masker"><div className="glow-stars" /></div>
                 </div>
                 <div className="glow-content">
-                  <button type="submit" className="hero-cta-btn">Analyze profile</button>
+                  <button type="submit" className="hero-cta-btn" disabled={submitting}>
+                    {submitting ? (
+                      <>
+                        <LoaderCircle size={15} strokeWidth={2.5} className="hero-cta-spinner" aria-hidden="true" />
+                        Analyzing…
+                      </>
+                    ) : (
+                      "Analyze profile"
+                    )}
+                  </button>
                 </div>
               </div>
             </div>
+            {error && (
+              <span id="cta-handle-error" role="alert" className="hero-input-error-msg">
+                {error}
+              </span>
+            )}
           </form>
 
           <p
@@ -186,9 +221,9 @@ export default function CTASection() {
             }}
           >
             <span>No login required</span>
-            <span>✦</span>
+            <span aria-hidden="true">·</span>
             <span>Free during beta</span>
-            <span>✦</span>
+            <span aria-hidden="true">·</span>
             <span>~10 seconds</span>
           </p>
         </div>

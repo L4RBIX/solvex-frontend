@@ -11,13 +11,12 @@ const productLinks = [
 const legalLinks = [
   { label: "Privacy",   href: "/privacy" },
   { label: "Terms",     href: "/terms" },
-  { label: "Contact",   href: "mailto:solvex@example.com" },
+  { label: "Contact",   href: "mailto:kydyrbekbekarys44@gmail.com" },
 ];
 
 const communityLinks = [
-  { label: "GitHub",      href: "https://github.com", external: true },
   { label: "Codeforces",  href: "https://codeforces.com", external: true },
-  { label: "Feedback",    href: "mailto:solvex@example.com", external: false },
+  { label: "Feedback",    href: "mailto:kydyrbekbekarys44@gmail.com?subject=SolveX%20feedback", external: false },
 ];
 
 interface LinkColumnProps {
@@ -141,30 +140,24 @@ export function Footer() {
           }}
         >
           <div style={{ fontSize: "13.5px", fontWeight: 600, color: "#F4F7F6", marginBottom: "10px" }}>
-            Built by a competitive programmer
+            Built by young founders
           </div>
-          <p style={{ fontSize: "13px", color: "rgba(244,247,246,0.4)", lineHeight: "21px", marginBottom: "16px" }}>
-            Bekarys Kydyrbekov · Kazakhstan<br />
-            Codeforces: rated, frustrated, building.
+          <p style={{ fontSize: "13px", color: "rgba(244,247,246,0.45)", lineHeight: "21px", marginBottom: "16px" }}>
+            Kydyrbek Bekarys &amp; Shaimardan Yerbossyn<br />
+            Kazakhstan · competitive programming, AI, and product building.
           </p>
-          <a
-            href="https://github.com"
-            target="_blank"
-            rel="noopener noreferrer"
+          <span
             style={{
               display: "inline-flex",
               alignItems: "center",
               gap: "6px",
               fontSize: "12.5px",
               color: "rgba(244,247,246,0.4)",
-              textDecoration: "none",
-              transition: "color 0.2s",
             }}
-            className="hover:!text-white"
           >
             <GitHubIcon />
-            Open source (coming soon)
-          </a>
+            Open source — coming soon
+          </span>
         </div>
       </div>
 
@@ -188,7 +181,9 @@ export function Footer() {
         }}
       >
         <span style={{ color: "rgba(244,247,246,0.28)" }}>©2026 SolveX. Free during beta.</span>
-        <span style={{ color: "rgba(244,247,246,0.28)" }}>Uses Codeforces public API · No private data stored</span>
+        <span style={{ color: "rgba(244,247,246,0.28)" }}>
+          Uses Codeforces public API · Not affiliated with Codeforces
+        </span>
       </div>
     </footer>
   );

@@ -1,5 +1,14 @@
 "use client";
 
+import {
+  CalendarDays,
+  ChartColumn,
+  Gauge,
+  Radar,
+  ShieldCheck,
+  TriangleAlert,
+  type LucideIcon,
+} from "lucide-react";
 import { RevealOnScroll } from "@/components/animations/motion";
 
 /* Mini UI helper components */
@@ -166,13 +175,20 @@ const steps = [
   },
 ];
 
-const capabilities = [
-  { icon: "◈", title: "Submission analysis",       body: "Aggregates all public submissions by verdict and tag across your full history." },
-  { icon: "◉", title: "Friction area detection",   body: "Finds topics with high retry cost, WA/TLE patterns, or systematic avoidance." },
-  { icon: "◆", title: "Error pattern breakdown",   body: "WA, TLE, RE, and CE counts by topic — not just totals." },
-  { icon: "◎", title: "Rating comfort zone",        body: "Your effective problem-rating range based on AC success vs. retry patterns." },
-  { icon: "◇", title: "7-day training queue",       body: "Problems selected by tag priority and rating range, not random or popular." },
-  { icon: "◈", title: "SkillTrace verification",    body: "Process-based improvement verification. Records solving attempts, not just results.", comingSoon: true },
+interface Capability {
+  icon: LucideIcon;
+  title: string;
+  body: string;
+  comingSoon?: boolean;
+}
+
+const capabilities: Capability[] = [
+  { icon: ChartColumn,   title: "Submission analysis",     body: "Aggregates public submissions by verdict, tag, rating range, and attempt history." },
+  { icon: Radar,         title: "Friction area detection", body: "Finds topics with high retry cost, WA/TLE density, and systematic avoidance." },
+  { icon: TriangleAlert, title: "Error pattern breakdown", body: "Shows WA, TLE, RE, and CE patterns by topic — not just global totals." },
+  { icon: Gauge,         title: "Rating comfort zone",     body: "Estimates your effective problem-rating range from AC success and retry patterns." },
+  { icon: CalendarDays,  title: "7-day training queue",    body: "Builds a focused plan from your weak topics and rating range." },
+  { icon: ShieldCheck,   title: "SkillTrace verification", body: "Records solving attempts and process signals, not just final accepted results.", comingSoon: true },
 ];
 
 export function HowItWorksSection() {
@@ -235,30 +251,40 @@ export function HowItWorksSection() {
             <h2 className="tx-h2">Everything you need to train with intent.</h2>
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "14px" }}>
-            {capabilities.map((cap, i) => (
-              <RevealOnScroll key={cap.title} delay={i + 1}>
-                <div
-                  className="tx-card"
-                  style={{
-                    padding: "24px",
-                    opacity: cap.comingSoon ? 0.65 : 1,
-                    cursor: "default",
-                  }}
-                >
-                  <div style={{ fontSize: "20px", color: "#00F5A0", marginBottom: "14px", lineHeight: 1 }}>
-                    {cap.icon}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "16px" }}>
+            {capabilities.map((cap, i) => {
+              const Icon = cap.icon;
+              return (
+                <RevealOnScroll key={cap.title} delay={i + 1} className="h-full">
+                  <div
+                    className="tx-card"
+                    style={{
+                      padding: "28px",
+                      height: "100%",
+                      display: "flex",
+                      flexDirection: "column",
+                      opacity: cap.comingSoon ? 0.72 : 1,
+                      cursor: "default",
+                    }}
+                  >
+                    <Icon
+                      size={20}
+                      strokeWidth={1.75}
+                      color="#00F5A0"
+                      aria-hidden="true"
+                      style={{ marginBottom: "18px", flexShrink: 0 }}
+                    />
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
+                      <h3 style={{ fontSize: "15px", fontWeight: 700, color: "#F4F7F6", letterSpacing: "-0.01em" }}>
+                        {cap.title}
+                      </h3>
+                      {cap.comingSoon && <span className="badge-coming-soon">Soon</span>}
+                    </div>
+                    <p style={{ fontSize: "13.5px", lineHeight: "21px", color: "#8A9A96", margin: 0 }}>{cap.body}</p>
                   </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
-                    <h3 style={{ fontSize: "14px", fontWeight: 700, color: "#F4F7F6", letterSpacing: "-0.01em" }}>
-                      {cap.title}
-                    </h3>
-                    {cap.comingSoon && <span className="badge-coming-soon">Soon</span>}
-                  </div>
-                  <p style={{ fontSize: "13px", lineHeight: "20px", color: "#8A9A96" }}>{cap.body}</p>
-                </div>
-              </RevealOnScroll>
-            ))}
+                </RevealOnScroll>
+              );
+            })}
           </div>
         </div>
       </section>

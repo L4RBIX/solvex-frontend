@@ -40,6 +40,10 @@ describe("Privacy and Terms pages", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Privacy" })).toBeInTheDocument();
     expect(container.textContent).toContain("never asks for, receives, or stores your Codeforces password");
     expect(container.textContent).toContain("not affiliated with");
+    expect(screen.getByRole("heading", { level: 2, name: "Website analytics" })).toBeInTheDocument();
+    expect(container.textContent).toContain("aggregated page visits and navigation");
+    expect(container.textContent).toContain("Query parameters containing Codeforces handles");
+    expect(container.textContent).toContain("does not send source code, email addresses, authentication tokens");
   });
 
   it("renders the terms page", () => {

@@ -33,6 +33,13 @@ const sections = [
     ],
   },
   {
+    title: "Website analytics",
+    body: [
+      "SolveX uses Vercel Web Analytics to measure aggregated page visits and navigation. Query parameters containing Codeforces handles or other user-provided values are removed before analytics events are sent.",
+      "SolveX does not send source code, email addresses, authentication tokens, or private account data to Vercel Analytics.",
+    ],
+  },
+  {
     title: "What we never do",
     body: [
       "We never ask for or store your Codeforces password. We never access private Codeforces data. We do not sell your data. We do not show ads.",

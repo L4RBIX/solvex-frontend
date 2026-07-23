@@ -48,11 +48,13 @@ export interface TestCase {
 
 export interface ArenaProblem {
   key: string;
+  contest_id?: number;
+  index?: string;
   name: string;
-  rating: number;
+  rating: number | null;
   tags: string[];
-  time_limit: string;
-  memory_limit: string;
+  time_limit?: string;
+  memory_limit?: string;
   statement: string;
   input_format: string;
   output_format: string;
@@ -61,4 +63,6 @@ export interface ArenaProblem {
   notes?: string;
   is_sample: boolean;
   official_url?: string | null;
+  content_available?: boolean;
+  content_notice?: string;
 }

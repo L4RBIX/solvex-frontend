@@ -21,6 +21,7 @@ import {
   getCurrentAccessToken,
   refreshAccessToken,
 } from "@/lib/supabaseClient";
+import { normalizeProblemId } from "@/lib/problemRoutes";
 
 export function getApiToken(): string {
   return getCurrentAccessToken();
@@ -76,6 +77,42 @@ async function v1Fetch<T>(path: string, init?: RequestInit): Promise<T> {
     );
   }
   return body as T;
+}
+
+async function publicV1Fetch(path: string): Promise<unknown> {
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${path}`);
+  } catch {
+    throw new V1ApiError(
+      0,
+      "NETWORK_ERROR",
+      "The SolveX problem catalog could not be reached."
+    );
+  }
+
+  const body = await res.json().catch(() => null);
+  if (!res.ok) {
+    const errorBody =
+      body && typeof body === "object"
+        ? (body as { error_code?: string; message?: string; error?: string })
+        : {};
+    throw new V1ApiError(
+      res.status,
+      errorBody.error_code ?? `HTTP_${res.status}`,
+      errorBody.message ??
+        errorBody.error ??
+        `Request failed (HTTP ${res.status})`
+    );
+  }
+  if (body === null) {
+    throw new V1ApiError(
+      502,
+      "INVALID_RESPONSE",
+      "The SolveX problem catalog returned an invalid response."
+    );
+  }
+  return body;
 }
 
 // ─── Account + Codeforces handle verification (security hotfix) ─────────────
@@ -243,6 +280,118 @@ export interface EntitlementsResponse {
 export interface SyncResponse {
   job: { id?: string; status: string; sync_type?: string; stats?: Record<string, number | string | boolean> };
   reused?: boolean;
+}
+
+export interface PublicProblemSample {
+  input: string;
+  output: string;
+  note: string | null;
+}
+
+export interface PublicProblemAuthoredContent {
+  summary: string;
+  input_format: string;
+  output_format: string;
+  constraints: string;
+  samples: PublicProblemSample[];
+}
+
+export interface PublicProblemResponse {
+  problem_id: string;
+  contest_id: number;
+  index: string;
+  name: string;
+  rating: number | null;
+  tags: string[];
+  official_url: string;
+  content_available: boolean;
+  authored_content: PublicProblemAuthoredContent | null;
+}
+
+function isPublicProblemSample(value: unknown): value is PublicProblemSample {
+  if (!value || typeof value !== "object") return false;
+  const sample = value as Record<string, unknown>;
+  return (
+    typeof sample.input === "string" &&
+    typeof sample.output === "string" &&
+    (sample.note === null || typeof sample.note === "string")
+  );
+}
+
+function isAuthoredContent(
+  value: unknown
+): value is PublicProblemAuthoredContent {
+  if (!value || typeof value !== "object") return false;
+  const content = value as Record<string, unknown>;
+  return (
+    typeof content.summary === "string" &&
+    typeof content.input_format === "string" &&
+    typeof content.output_format === "string" &&
+    typeof content.constraints === "string" &&
+    Array.isArray(content.samples) &&
+    content.samples.every(isPublicProblemSample)
+  );
+}
+
+function isPublicProblemResponse(
+  value: unknown
+): value is PublicProblemResponse {
+  if (!value || typeof value !== "object") return false;
+  const problem = value as Record<string, unknown>;
+  if (
+    typeof problem.problem_id !== "string" ||
+    typeof problem.contest_id !== "number" ||
+    !Number.isSafeInteger(problem.contest_id) ||
+    typeof problem.index !== "string" ||
+    typeof problem.name !== "string" ||
+    (problem.rating !== null && typeof problem.rating !== "number") ||
+    !Array.isArray(problem.tags) ||
+    !problem.tags.every((tag) => typeof tag === "string") ||
+    typeof problem.official_url !== "string" ||
+    typeof problem.content_available !== "boolean"
+  ) {
+    return false;
+  }
+  return problem.content_available
+    ? isAuthoredContent(problem.authored_content)
+    : problem.authored_content === null;
+}
+
+export async function getPublicProblem(
+  rawProblemId: string
+): Promise<PublicProblemResponse> {
+  const problemId = normalizeProblemId(rawProblemId);
+  if (!problemId) {
+    throw new V1ApiError(
+      400,
+      "INVALID_PROBLEM_ID",
+      "Problem ID must use a positive contest ID followed by an alphanumeric index."
+    );
+  }
+
+  const body = await publicV1Fetch(
+    `/api/v1/problems/${encodeURIComponent(problemId)}`
+  );
+  if (!isPublicProblemResponse(body)) {
+    throw new V1ApiError(
+      502,
+      "INVALID_RESPONSE",
+      "The SolveX problem catalog returned invalid problem metadata."
+    );
+  }
+  if (
+    normalizeProblemId(body.problem_id) !== problemId ||
+    normalizeProblemId(`${body.contest_id}${body.index}`) !== problemId ||
+    body.official_url !==
+      `https://codeforces.com/problemset/problem/${body.contest_id}/${body.index}`
+  ) {
+    throw new V1ApiError(
+      502,
+      "INVALID_RESPONSE",
+      "The SolveX problem catalog returned mismatched problem metadata."
+    );
+  }
+  return body;
 }
 
 // ─── Gamification (Phase G1 + G2) ────────────────────────────────────────────

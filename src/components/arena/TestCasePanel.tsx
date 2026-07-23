@@ -14,6 +14,7 @@ interface TestCasePanelProps {
   onUpdate: (id: string, field: "input" | "expected_output", value: string) => void;
   isRunning: boolean;
   runningId: string | null;
+  localOnly?: boolean;
 }
 
 const STATUS_DOT: Record<ExecutionStatus, string> = {
@@ -46,21 +47,31 @@ function TestCaseItem({
   onDelete,
   onUpdate,
   isRunning,
+  localOnly,
 }: {
   tc: TestCase;
   onRun: () => void;
   onDelete: () => void;
   onUpdate: (field: "input" | "expected_output", value: string) => void;
   isRunning: boolean;
+  localOnly: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
   const dotColor = STATUS_DOT[tc.status];
-  const label = STATUS_LABEL[tc.status];
+  const label =
+    localOnly && tc.status === "accepted"
+      ? tc.expected_output.trim()
+        ? "Output matched"
+        : "Ran successfully"
+      : localOnly && tc.status === "wrong_answer"
+        ? "Output differs"
+        : STATUS_LABEL[tc.status];
 
   const actualColor =
     tc.status === "accepted" ? "#00F5A0"
     : tc.status === "wrong_answer" ? "#FF6680"
     : "#8A9A96";
+  const readOnly = tc.is_sample && !localOnly;
 
   return (
     <div
@@ -163,7 +174,7 @@ function TestCaseItem({
         >
           {[
             { label: "Input", field: "input" as const, value: tc.input },
-            { label: "Expected", field: "expected_output" as const, value: tc.expected_output },
+            { label: "Expected (optional)", field: "expected_output" as const, value: tc.expected_output },
           ].map(({ label, field, value }) => (
             <div key={field}>
               <label
@@ -182,7 +193,7 @@ function TestCaseItem({
               <textarea
                 value={value}
                 onChange={(e) => onUpdate(field, e.target.value)}
-                readOnly={tc.is_sample}
+                readOnly={readOnly}
                 rows={2}
                 style={{
                   width: "100%",
@@ -196,8 +207,8 @@ function TestCaseItem({
                   lineHeight: "18px",
                   resize: "none",
                   outline: "none",
-                  opacity: tc.is_sample ? 0.7 : 1,
-                  cursor: tc.is_sample ? "default" : "text",
+                  opacity: readOnly ? 0.7 : 1,
+                  cursor: readOnly ? "default" : "text",
                   boxSizing: "border-box",
                 }}
                 onFocus={(e) => { e.currentTarget.style.borderColor = "rgba(0,245,160,0.3)"; }}
@@ -256,6 +267,7 @@ export default function TestCasePanel({
   onUpdate,
   isRunning,
   runningId,
+  localOnly = false,
 }: TestCasePanelProps) {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
@@ -280,7 +292,7 @@ export default function TestCasePanel({
             letterSpacing: "0.08em",
           }}
         >
-          Tests ({testCases.length})
+          {localOnly ? "Local tests" : "Tests"} ({testCases.length})
         </span>
         <div style={{ display: "flex", gap: "4px" }}>
           {[
@@ -324,6 +336,22 @@ export default function TestCasePanel({
         </div>
       </div>
 
+      {localOnly && (
+        <div
+          style={{
+            padding: "8px 10px",
+            borderBottom: "1px solid rgba(0,217,245,0.1)",
+            background: "rgba(0,217,245,0.04)",
+            color: "#6A8A7A",
+            fontSize: "10px",
+            lineHeight: "15px",
+          }}
+        >
+          Use public samples or add your own input and optional expected output.
+          Results are local practice runs, not official Codeforces judging.
+        </div>
+      )}
+
       {/* List */}
       <div style={{ flex: 1, overflowY: "auto", padding: "8px", display: "flex", flexDirection: "column", gap: "6px" }}>
         <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
@@ -335,6 +363,7 @@ export default function TestCasePanel({
             onDelete={() => onDelete(tc.id)}
             onUpdate={(field, value) => onUpdate(tc.id, field, value)}
             isRunning={isRunning}
+            localOnly={localOnly}
           />
         ))}
       </div>

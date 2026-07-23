@@ -9,6 +9,8 @@ import { V1TrainingPanel } from "@/components/analyze/V1TrainingPanel";
 import { GamificationWidget } from "@/components/analyze/GamificationWidget";
 import { PrivateLeaderboardSection } from "@/components/analyze/PrivateLeaderboardSection";
 import { PvPCallout } from "@/components/analyze/PvPCallout";
+import { ProblemActions } from "@/components/analyze/ProblemActions";
+import { problemIdFromParts } from "@/lib/problemRoutes";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -29,11 +31,6 @@ function rankColor(rank: string): string {
   if (r.includes("specialist")) return "#00D9F5";
   if (r.includes("pupil")) return "#77DD77";
   return "#8A9A96";
-}
-
-function cfProblemLink(contestId?: number, index?: string): string | null {
-  if (!contestId || !index) return null;
-  return `https://codeforces.com/problemset/problem/${contestId}/${index}`;
 }
 
 function capitalizeTag(tag: string): string {
@@ -900,10 +897,7 @@ function RecommendedProblems({
           }}
         >
           {filtered.map((p, i) => {
-            // Arena only renders a fixed sample problem outside duel mode
-            // (see ArenaLayout.tsx) — an "Open in Arena" link here would be
-            // a second dead-end, so the working action is the real CF page.
-            const cfLink = cfProblemLink(p.contestId, p.index);
+            const problemId = problemIdFromParts(p.contestId, p.index);
             const tag = primaryFrictionTag(p, frictionTagSet);
 
             return (
@@ -952,26 +946,11 @@ function RecommendedProblems({
                   {p.reason}
                 </div>
 
-                {cfLink ? (
-                  <a
-                    href={cfLink}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="tx-press"
-                    style={{
-                      display: "inline-flex", alignItems: "center", justifyContent: "center",
-                      gap: "5px", fontSize: "12px", fontWeight: 700,
-                      color: "#00F5A0", textDecoration: "none",
-                      border: "1px solid rgba(0,245,160,0.25)",
-                      borderRadius: "9999px", padding: "6px 14px",
-                      marginTop: "2px",
-                    }}
-                  >
-                    Open on Codeforces →
-                  </a>
+                {problemId ? (
+                  <ProblemActions problemId={problemId} handle={data.handle} />
                 ) : (
                   <span style={{ fontSize: "11.5px", color: "#5b6d68", marginTop: "2px" }}>
-                    Link unavailable
+                    Arena link unavailable
                   </span>
                 )}
               </div>
@@ -985,7 +964,7 @@ function RecommendedProblems({
 
 // ─── 7-day queue ──────────────────────────────────────────────────────────────
 
-function QueueTable({ queue }: { queue: QueueDay[] }) {
+function QueueTable({ queue, handle }: { queue: QueueDay[]; handle: string }) {
   return (
     <div
       style={{
@@ -996,14 +975,15 @@ function QueueTable({ queue }: { queue: QueueDay[] }) {
     >
       {/* Header */}
       <div
+        className="queue-grid-header"
         style={{
-          display: "grid", gridTemplateColumns: "52px 160px 1fr 80px 1fr",
+          display: "grid", gridTemplateColumns: "52px 150px minmax(160px,1fr) 72px minmax(180px,1fr) 170px",
           padding: "11px 24px",
           background: "rgba(0,245,160,0.03)",
           borderBottom: "1px solid rgba(0,245,160,0.08)",
         }}
       >
-        {["Day", "Focus", "Problem", "Rating", "Reason"].map((h) => (
+        {["Day", "Focus", "Problem", "Rating", "Reason", "Action"].map((h) => (
           <div key={h} style={{ fontSize: "10.5px", fontWeight: 700, color: "#8A9A96", textTransform: "uppercase", letterSpacing: "0.08em" }}>
             {h}
           </div>
@@ -1011,18 +991,21 @@ function QueueTable({ queue }: { queue: QueueDay[] }) {
       </div>
 
       {/* Rows */}
-      {queue.map((row, i) => (
-        <div
-          key={row.day}
-          style={{
-            display: "grid", gridTemplateColumns: "52px 160px 1fr 80px 1fr",
-            padding: "15px 24px",
-            borderBottom: i < queue.length - 1 ? "1px solid rgba(0,245,160,0.06)" : "none",
-            transition: "background 0.15s",
-          }}
-          onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(0,245,160,0.025)"; }}
-          onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
-        >
+      {queue.map((row, i) => {
+        const problemId = problemIdFromParts(row.contestId, row.index);
+        return (
+          <div
+            key={row.day}
+            className="queue-grid-row"
+            style={{
+              display: "grid", gridTemplateColumns: "52px 150px minmax(160px,1fr) 72px minmax(180px,1fr) 170px",
+              padding: "15px 24px",
+              borderBottom: i < queue.length - 1 ? "1px solid rgba(0,245,160,0.06)" : "none",
+              transition: "background 0.15s",
+            }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(0,245,160,0.025)"; }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+          >
           <div style={{ display: "flex", alignItems: "center" }}>
             <span style={{ fontSize: "13px", fontWeight: 700, color: "#00F5A0", fontFamily: "ui-monospace, monospace" }}>
               {row.day}
@@ -1061,8 +1044,18 @@ function QueueTable({ queue }: { queue: QueueDay[] }) {
               {row.reason}
             </span>
           </div>
+          <div style={{ display: "flex", alignItems: "center" }}>
+            {problemId && (
+              <ProblemActions
+                problemId={problemId}
+                handle={handle}
+                compact
+              />
+            )}
+          </div>
         </div>
-      ))}
+        );
+      })}
 
       {/* Mobile responsive style */}
       <style>{`
@@ -1161,7 +1154,7 @@ function Dashboard({ data }: { data: AnalysisResult }) {
           title="Your training queue"
           subtitle="Problems and focus areas selected from your friction patterns, not from a random list."
         />
-        <QueueTable queue={data.sevenDayQueue} />
+        <QueueTable queue={data.sevenDayQueue} handle={data.handle} />
       </section>
 
       {/* v1 training engine (weakness map, daily queue, plans, weekly report) */}

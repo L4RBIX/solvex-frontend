@@ -9,6 +9,7 @@ interface OutputConsoleProps {
   result: ExecutionResult | null;
   isRunning: boolean;
   events: ArenaEvent[];
+  localOnly?: boolean;
 }
 
 type ConsoleTab = "output" | "errors" | "judge" | "events";
@@ -32,11 +33,23 @@ const TABS: Array<{ id: ConsoleTab; label: string; Icon: React.ElementType }> = 
   { id: "events", label: "Events",  Icon: Activity },
 ];
 
-export default function OutputConsole({ result, isRunning, events }: OutputConsoleProps) {
+export default function OutputConsole({
+  result,
+  isRunning,
+  events,
+  localOnly = false,
+}: OutputConsoleProps) {
   const [tab, setTab] = useState<ConsoleTab>("output");
 
   const status = isRunning ? "running" : (result?.status ?? "not_run");
-  const statusInfo = STATUS_CONFIG[status as ExecutionStatus] ?? STATUS_CONFIG.not_run;
+  const baseStatusInfo =
+    STATUS_CONFIG[status as ExecutionStatus] ?? STATUS_CONFIG.not_run;
+  const statusInfo =
+    localOnly && status === "accepted"
+      ? { ...baseStatusInfo, label: "Run completed" }
+      : localOnly && status === "wrong_answer"
+        ? { ...baseStatusInfo, label: "Output differs" }
+        : baseStatusInfo;
 
   return (
     <div
@@ -86,14 +99,14 @@ export default function OutputConsole({ result, isRunning, events }: OutputConso
             }}
           >
             <Icon size={11} />
-            {label}
+            {localOnly && id === "judge" ? "Run details" : label}
           </button>
         ))}
 
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", padding: "0 12px" }}>
           {result?.is_mock === false ? (
             <span style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "10px", color: "#00F5A0" }}>
-              <Wifi size={10} />Judge0
+              <Wifi size={10} />{localOnly ? "Execution service" : "Judge0"}
             </span>
           ) : result?.is_mock === true ? (
             <span style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "10px", color: "#3A5A4A" }}>
@@ -182,6 +195,18 @@ export default function OutputConsole({ result, isRunning, events }: OutputConso
 
         {tab === "judge" && (
           <div>
+            {localOnly && (
+              <p
+                style={{
+                  color: "#6A8A7A",
+                  lineHeight: "18px",
+                  margin: "0 0 12px",
+                }}
+              >
+                Local/public test execution only — not official Codeforces
+                judging.
+              </p>
+            )}
             {result?.is_mock ? (
               <div
                 style={{

@@ -10,7 +10,10 @@ vi.mock("@/lib/supabaseClient", () => ({
   refreshAccessToken,
 }));
 
-import { getGamification } from "@/lib/v1Api";
+import {
+  getGamification,
+  getPublicProblem,
+} from "@/lib/v1Api";
 
 const snapshot = {
   subject: "user:test",
@@ -59,5 +62,101 @@ describe("private API bearer handling", () => {
     await expect(getGamification()).rejects.toMatchObject({ status: 401 });
     expect(refreshAccessToken).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+const publicProblem = {
+  problem_id: "71A",
+  contest_id: 71,
+  index: "A",
+  name: "Way Too Long Words",
+  rating: 800,
+  tags: ["strings"],
+  official_url: "https://codeforces.com/problemset/problem/71/A",
+  content_available: true,
+  authored_content: {
+    summary: "Shorten long words.",
+    input_format: "Read n and n words.",
+    output_format: "Print each transformed word.",
+    constraints: "1 <= n <= 100.",
+    samples: [{ input: "1\nlocalization\n", output: "l10n\n", note: null }],
+  },
+};
+
+describe("public problem API", () => {
+  beforeEach(() => {
+    getAccessToken.mockClear();
+  });
+
+  it("normalizes the ID, validates the payload, and sends no bearer token", async () => {
+    const fetchMock = vi.fn<FetchFn>(async () =>
+      new Response(JSON.stringify(publicProblem), { status: 200 })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getPublicProblem(" 71a ")).resolves.toEqual(publicProblem);
+    expect(fetchMock.mock.calls[0][0].toString()).toContain(
+      "/api/v1/problems/71A"
+    );
+    expect(
+      new Headers(fetchMock.mock.calls[0][1]?.headers).has("Authorization")
+    ).toBe(false);
+    expect(getAccessToken).not.toHaveBeenCalled();
+  });
+
+  it("rejects malformed IDs before making a request", async () => {
+    const fetchMock = vi.fn<FetchFn>();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getPublicProblem("../../etc/passwd")).rejects.toMatchObject({
+      status: 400,
+      errorCode: "INVALID_PROBLEM_ID",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("preserves not-found errors from the backend", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<FetchFn>(async () =>
+        new Response(
+          JSON.stringify({
+            error_code: "PROBLEM_NOT_FOUND",
+            message: "Problem not found.",
+          }),
+          { status: 404 }
+        )
+      )
+    );
+
+    await expect(getPublicProblem("9999Z")).rejects.toMatchObject({
+      status: 404,
+      errorCode: "PROBLEM_NOT_FOUND",
+    });
+  });
+
+  it("distinguishes invalid payloads from network failures", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<FetchFn>(async () =>
+        new Response(JSON.stringify({ ...publicProblem, tags: "strings" }), {
+          status: 200,
+        })
+      )
+    );
+    await expect(getPublicProblem("71A")).rejects.toMatchObject({
+      errorCode: "INVALID_RESPONSE",
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<FetchFn>(async () => {
+        throw new TypeError("offline");
+      })
+    );
+    await expect(getPublicProblem("71A")).rejects.toMatchObject({
+      status: 0,
+      errorCode: "NETWORK_ERROR",
+    });
   });
 });

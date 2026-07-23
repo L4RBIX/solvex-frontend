@@ -11,6 +11,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   V1ApiError,
   WeaknessResponse,
+  QueueItem,
   QueueResponse,
   PlanResponse,
   WeeklyReportResponse,
@@ -25,6 +26,7 @@ import {
 import { useAuth } from "@/hooks/useAuth";
 import SignInGate from "@/components/auth/SignInGate";
 import HandleClaimPanel from "@/components/auth/HandleClaimPanel";
+import { ProblemActions } from "@/components/analyze/ProblemActions";
 
 const COLORS = {
   bg: "#06100D",
@@ -51,12 +53,6 @@ const STATUS_COLORS: Record<string, string> = {
 
 function statusLabel(status: string): string {
   return status.replaceAll("_", " ");
-}
-
-function problemUrl(problemId: string): string | null {
-  const match = problemId.match(/^(\d+)([A-Z][0-9]?)$/i);
-  if (!match) return null;
-  return `https://codeforces.com/problemset/problem/${match[1]}/${match[2]}`;
 }
 
 /** Precise, actionable copy per backend warning code, instead of one generic
@@ -104,6 +100,32 @@ function LockCard({ label, hint }: { label: string; hint?: string }) {
         </div>
       </div>
     </Card>
+  );
+}
+
+function TrainingProblemRow({
+  item,
+  handle,
+}: {
+  item: QueueItem;
+  handle: string;
+}) {
+  return (
+    <div
+      style={{
+        padding: "8px 0",
+        borderTop: "1px solid rgba(255,255,255,0.05)",
+      }}
+    >
+      <div style={{ fontSize: "12px", color: COLORS.muted, lineHeight: 1.5 }}>
+        {item.problem_name ?? item.problem_id}
+        {item.problem_rating != null ? ` (${item.problem_rating})` : ""} ·{" "}
+        {statusLabel(item.mode)}
+      </div>
+      {item.problem_id && (
+        <ProblemActions problemId={item.problem_id} handle={handle} compact />
+      )}
+    </div>
   );
 }
 
@@ -387,19 +409,16 @@ export function V1TrainingPanel({ handle }: { handle: string }) {
                     Slot {item.slot} · {statusLabel(item.mode)}
                   </div>
                   <div style={{ color: COLORS.text, fontWeight: 700, fontSize: "14px", marginBottom: "4px" }}>
-                    {item.problem_id && problemUrl(item.problem_id) ? (
-                      <a href={problemUrl(item.problem_id)!} target="_blank" rel="noreferrer" style={{ color: COLORS.text, textDecoration: "underline" }}>
-                        {item.problem_name ?? item.problem_id}
-                      </a>
-                    ) : (
-                      item.problem_name ?? item.problem_id
-                    )}
+                    {item.problem_name ?? item.problem_id}
                     {item.problem_rating != null && (
                       <span style={{ color: COLORS.muted, fontWeight: 500, fontSize: "12px" }}> · {item.problem_rating}</span>
                     )}
                   </div>
                   {item.why_selected && (
                     <p style={{ fontSize: "12px", color: COLORS.muted, lineHeight: 1.5 }}>{item.why_selected}</p>
+                  )}
+                  {item.problem_id && (
+                    <ProblemActions problemId={item.problem_id} handle={handle} />
                   )}
                 </Card>
               )
@@ -430,10 +449,11 @@ export function V1TrainingPanel({ handle }: { handle: string }) {
                   </div>
                   <div style={{ color: COLORS.text, fontWeight: 600, fontSize: "13px", marginBottom: "8px" }}>{day.theme}</div>
                   {day.items.map((item) => (
-                    <div key={item.item_id ?? item.slot} style={{ fontSize: "12px", color: COLORS.muted, marginBottom: "4px" }}>
-                      • {item.problem_id}
-                      {item.problem_rating != null ? ` (${item.problem_rating})` : ""} — {statusLabel(item.mode)}
-                    </div>
+                    <TrainingProblemRow
+                      key={item.item_id ?? item.slot}
+                      item={item}
+                      handle={handle}
+                    />
                   ))}
                 </Card>
               )
@@ -523,10 +543,11 @@ export function V1TrainingPanel({ handle }: { handle: string }) {
                 <div style={{ fontSize: "11px", color: COLORS.mint, fontWeight: 700, marginBottom: "6px" }}>DAY {day.day_number}</div>
                 <div style={{ color: COLORS.text, fontWeight: 600, fontSize: "13px", marginBottom: "8px" }}>{day.theme}</div>
                 {day.items.map((item) => (
-                  <div key={item.item_id ?? item.slot} style={{ fontSize: "12px", color: COLORS.muted, marginBottom: "4px" }}>
-                    • {item.problem_id}
-                    {item.problem_rating != null ? ` (${item.problem_rating})` : ""} — {statusLabel(item.mode)}
-                  </div>
+                  <TrainingProblemRow
+                    key={item.item_id ?? item.slot}
+                    item={item}
+                    handle={handle}
+                  />
                 ))}
               </Card>
             ))}

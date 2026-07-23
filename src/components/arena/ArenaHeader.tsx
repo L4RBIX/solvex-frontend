@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Play, Send, RotateCcw, Copy, Check } from "lucide-react";
+import { ArrowLeft, Play, Send, RotateCcw, Copy, Check, ExternalLink } from "lucide-react";
 import LanguageSelect from "./LanguageSelect";
 import SnapshotIndicator from "./SnapshotIndicator";
 import type { ExecutionLanguage } from "@/types/execution";
@@ -20,6 +20,9 @@ interface ArenaHeaderProps {
   isSubmitting: boolean;
   submitDisabled?: boolean;
   submitDisabledReason?: string;
+  duelMode?: boolean;
+  officialUrl?: string | null;
+  runLabel?: string;
   savedAt: number | null;
   snapshotCount: number;
 }
@@ -37,6 +40,9 @@ export default function ArenaHeader({
   isSubmitting,
   submitDisabled = false,
   submitDisabledReason,
+  duelMode = true,
+  officialUrl,
+  runLabel,
   savedAt,
   snapshotCount,
 }: ArenaHeaderProps) {
@@ -95,6 +101,7 @@ export default function ArenaHeader({
       <img
         src="/SolveX-logo-cropped.png"
         alt="SolveX"
+        className="arena-logo"
         style={{
           height: "30px",
           width: "auto",
@@ -144,7 +151,9 @@ export default function ArenaHeader({
       <div style={{ flex: 1 }} />
 
       {/* Right side controls */}
-      <SnapshotIndicator savedAt={savedAt} count={snapshotCount} />
+      <div className="arena-snapshots">
+        <SnapshotIndicator savedAt={savedAt} count={snapshotCount} />
+      </div>
 
       <LanguageSelect value={language} onChange={onLanguageChange} disabled={busy} />
 
@@ -207,6 +216,8 @@ export default function ArenaHeader({
         type="button"
         onClick={onRun}
         disabled={busy}
+        aria-label={runLabel ?? (duelMode ? "Run" : "Run local tests")}
+        title={runLabel ?? (duelMode ? "Run" : "Run local tests")}
         className="tx-press"
         style={{
           display: "flex",
@@ -249,52 +260,79 @@ export default function ArenaHeader({
         ) : (
           <Play size={12} />
         )}
-        Run
+        <span className="arena-run-label">
+          {runLabel ?? (duelMode ? "Run" : "Run local tests")}
+        </span>
         <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
       </button>
 
-      {/* Submit */}
-      <button
-        type="button"
-        onClick={onSubmit}
-        disabled={cannotSubmit}
-        title={submitDisabled ? submitDisabledReason : undefined}
-        className="tx-press"
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: "6px",
-          padding: "6px 14px",
-          borderRadius: "8px",
-          border: "none",
-          background: "linear-gradient(135deg, #00F5A0, #00D9F5)",
-          color: "#020806",
-          fontSize: "12px",
-          fontWeight: 700,
-          cursor: cannotSubmit ? "not-allowed" : "pointer",
-          opacity: cannotSubmit ? 0.4 : 1,
-          transition: "opacity 0.15s",
-        }}
-        onMouseEnter={(e) => { if (!cannotSubmit) (e.currentTarget as HTMLButtonElement).style.opacity = "0.88"; }}
-        onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.opacity = cannotSubmit ? "0.4" : "1"; }}
-      >
-        {isSubmitting ? (
-          <span
-            style={{
-              width: "12px",
-              height: "12px",
-              border: "2px solid #020806",
-              borderTopColor: "transparent",
-              borderRadius: "50%",
-              display: "inline-block",
-              animation: "spin 0.7s linear infinite",
-            }}
-          />
-        ) : (
-          <Send size={12} />
-        )}
-        Submit
-      </button>
+      {duelMode ? (
+        <button
+          type="button"
+          onClick={onSubmit}
+          disabled={cannotSubmit}
+          title={submitDisabled ? submitDisabledReason : undefined}
+          className="tx-press"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "6px",
+            padding: "6px 14px",
+            borderRadius: "8px",
+            border: "none",
+            background: "linear-gradient(135deg, #00F5A0, #00D9F5)",
+            color: "#020806",
+            fontSize: "12px",
+            fontWeight: 700,
+            cursor: cannotSubmit ? "not-allowed" : "pointer",
+            opacity: cannotSubmit ? 0.4 : 1,
+            transition: "opacity 0.15s",
+          }}
+          onMouseEnter={(e) => { if (!cannotSubmit) (e.currentTarget as HTMLButtonElement).style.opacity = "0.88"; }}
+          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.opacity = cannotSubmit ? "0.4" : "1"; }}
+        >
+          {isSubmitting ? (
+            <span
+              style={{
+                width: "12px",
+                height: "12px",
+                border: "2px solid #020806",
+                borderTopColor: "transparent",
+                borderRadius: "50%",
+                display: "inline-block",
+                animation: "spin 0.7s linear infinite",
+              }}
+            />
+          ) : (
+            <Send size={12} />
+          )}
+          Submit
+        </button>
+      ) : officialUrl ? (
+        <a
+          href={officialUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          title="Official submission happens on Codeforces"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "5px",
+            minHeight: "30px",
+            padding: "6px 10px",
+            border: "1px solid rgba(0,217,245,0.25)",
+            borderRadius: "7px",
+            color: "#00D9F5",
+            fontSize: "11px",
+            fontWeight: 700,
+            textDecoration: "none",
+            whiteSpace: "nowrap",
+          }}
+        >
+          <span className="arena-official-label">Open on Codeforces</span>
+          <ExternalLink size={11} />
+        </a>
+      ) : null}
     </header>
   );
 }

@@ -45,6 +45,8 @@ export interface QueueDay {
   day: number;
   focus: string;
   problemName?: string;
+  contestId?: number;
+  index?: string;
   rating: number;
   reason: string;
   tagColor: string;

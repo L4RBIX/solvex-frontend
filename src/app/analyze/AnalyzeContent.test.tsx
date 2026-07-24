@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AnalysisResult } from "@/lib/cfAnalysis";
 
@@ -153,12 +153,60 @@ describe("Analysis dashboard clarity", () => {
     expect(screen.queryByText(/Showing problems for:/i)).not.toBeInTheDocument();
   });
 
-  it("retry queue Solve action links to the real Codeforces problem, not a dead href", async () => {
+  it("retry queue opens Arena first and keeps Codeforces secondary", async () => {
     render(<AnalyzeContent />);
     await screen.findByText("Problems to revisit");
 
-    const solveLink = screen.getByRole("link", { name: /Open on Codeforces/i });
-    expect(solveLink).toHaveAttribute("href", "https://codeforces.com/problemset/problem/1868/A");
+    const solveLink = screen.getByRole("link", { name: "Solve in Arena" });
+    expect(solveLink).toHaveAttribute(
+      "href",
+      "/arena?problem=1868A&handle=tourist"
+    );
+    expect(solveLink.getAttribute("href")).not.toContain("codeforces.com");
+
+    const officialLink = screen.getByRole("link", { name: /Codeforces/i });
+    expect(officialLink).toHaveAttribute(
+      "href",
+      "https://codeforces.com/problemset/problem/1868/A"
+    );
+    expect(officialLink).toHaveAttribute("target", "_blank");
+  });
+
+  it("seven-day training queue opens the selected problem in Arena", async () => {
+    mocks.fetchLegacyAnalysis.mockResolvedValue({
+      ...mockResult,
+      sevenDayQueue: [
+        {
+          day: 1,
+          focus: "Shortest Paths",
+          problemName: "Remilia Plays Soku",
+          contestId: 1868,
+          index: "A",
+          rating: 1100,
+          reason: "High wrong-answer rate",
+          tagColor: "#00D9F5",
+        },
+      ],
+    });
+    render(<AnalyzeContent />);
+    await screen.findByText("Your training queue");
+
+    const queue = screen.getByText("Your training queue").closest("section");
+    expect(queue).not.toBeNull();
+    const queueView = within(queue as HTMLElement);
+    const solveLink = queueView.getByRole("link", { name: "Solve in Arena" });
+    const officialLink = queueView.getByRole("link", { name: /Codeforces/i });
+    expect(solveLink).toHaveAttribute(
+      "href",
+      "/arena?problem=1868A&handle=tourist"
+    );
+    expect(solveLink).toHaveTextContent("Solve in Arena");
+    expect(officialLink).toHaveAttribute(
+      "href",
+      "https://codeforces.com/problemset/problem/1868/A"
+    );
+    expect(officialLink).toHaveTextContent("Codeforces");
+    expect(officialLink).toHaveAttribute("target", "_blank");
   });
 
   it("rating comfort zone explains itself and shows suggested range in the summary", async () => {

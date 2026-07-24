@@ -29,4 +29,38 @@ describe("ArenaHeader duel submit availability", () => {
     fireEvent.click(submit);
     expect(onSubmit).not.toHaveBeenCalled();
   });
+
+  it("uses local-run language and an official external action in solo mode", () => {
+    render(
+      <ArenaHeader
+        problemKey="71A"
+        problemName="Way Too Long Words"
+        language="cpp17"
+        onLanguageChange={vi.fn()}
+        onRun={vi.fn()}
+        onSubmit={vi.fn()}
+        onReset={vi.fn()}
+        onCopy={vi.fn()}
+        isRunning={false}
+        isSubmitting={false}
+        duelMode={false}
+        officialUrl="https://codeforces.com/problemset/problem/71/A"
+        savedAt={null}
+        snapshotCount={0}
+      />
+    );
+
+    expect(
+      screen.getByRole("button", { name: "Run local tests" })
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Submit" })
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: /Open on Codeforces/i })
+    ).toHaveAttribute(
+      "href",
+      "https://codeforces.com/problemset/problem/71/A"
+    );
+  });
 });

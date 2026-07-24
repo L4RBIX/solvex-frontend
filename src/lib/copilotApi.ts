@@ -153,7 +153,7 @@ export function buildProblemContext(problem: ArenaProblem): CopilotProblemContex
     title: problem.name,
     statement: problem.statement,
     tags: problem.tags,
-    rating: problem.rating,
+    ...(problem.rating !== null ? { rating: problem.rating } : {}),
     // Pass sample tests so the backend can verify code against them
     examples: problem.sample_tests.map((t) => ({
       input: t.input,

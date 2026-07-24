@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useSearchParams } from "next/navigation";
 import ArenaHeader from "./ArenaHeader";
 import ArenaRightTabs, { type ArenaRightTab } from "./ArenaRightTabs";
@@ -9,11 +16,25 @@ import CodeEditor from "./CodeEditor";
 import TestCasePanel from "./TestCasePanel";
 import OutputConsole from "./OutputConsole";
 import CopilotPanel from "./CopilotPanel";
+import ArenaProblemState, {
+  type ArenaProblemStateKind,
+} from "./ArenaProblemState";
 import { DuelResultOverlay, DuelStatusBar } from "./DuelPanel";
-import { runCode, submitCode } from "@/lib/executionApi";
+import { runCode } from "@/lib/executionApi";
 import type { CopilotMessage } from "@/lib/copilotApi";
-import type { DuelHintResponse } from "@/lib/v1Api";
-import { V1ApiError, openDuelArena, requestDuelHint, submitDuel } from "@/lib/v1Api";
+import type { DuelHintResponse, PublicProblemResponse } from "@/lib/v1Api";
+import {
+  V1ApiError,
+  getPublicProblem,
+  openDuelArena,
+  requestDuelHint,
+  submitDuel,
+} from "@/lib/v1Api";
+import {
+  codeforcesProblemHref,
+  normalizeProblemId,
+  soloArenaDraftKey,
+} from "@/lib/problemRoutes";
 import { useDuelState } from "@/hooks/useDuelState";
 import { useAuth } from "@/hooks/useAuth";
 import SignInGate from "@/components/auth/SignInGate";
@@ -62,7 +83,7 @@ function makeId(): string {
   return `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function codeKey(problemKey: string, language: ExecutionLanguage) {
+function legacyCodeKey(problemKey: string, language: ExecutionLanguage) {
   return `sx_arena_code_${problemKey}_${language}`;
 }
 
@@ -83,6 +104,66 @@ function saveSnaps(key: string, snaps: CodeSnapshot[]) {
   localStorage.setItem(key, JSON.stringify(snaps.slice(-10)));
 }
 
+function localTestsForProblem(problem: ArenaProblem): TestCase[] {
+  const samples = makeSampleTests(problem);
+  return samples.length > 0
+    ? samples
+    : [
+        {
+          id: makeId(),
+          input: "",
+          expected_output: "",
+          status: "not_run",
+          is_sample: false,
+          label: "Local test 1",
+        },
+      ];
+}
+
+function publicProblemToArena(problem: PublicProblemResponse): ArenaProblem {
+  const content = problem.authored_content;
+  return {
+    key: problem.problem_id,
+    contest_id: problem.contest_id,
+    index: problem.index,
+    name: problem.name,
+    rating: problem.rating,
+    tags: problem.tags,
+    statement:
+      content?.summary ??
+      "SolveX has catalog metadata for this problem but does not currently store a SolveX-authored practice summary or the official Codeforces statement.",
+    input_format: content?.input_format ?? "",
+    output_format: content?.output_format ?? "",
+    constraints: content?.constraints,
+    sample_tests:
+      content?.samples.map((sample) => ({
+        input: sample.input,
+        output: sample.output,
+        ...(sample.note ? { note: sample.note } : {}),
+      })) ?? [],
+    is_sample: false,
+    official_url: problem.official_url,
+    content_available: problem.content_available,
+    content_notice: problem.content_available
+      ? "SolveX-authored practice summary. Use the official Codeforces page for the original statement."
+      : "SolveX does not store the official Codeforces statement.",
+  };
+}
+
+type SoloProblemLoadState =
+  | { status: "idle" }
+  | { status: "loading"; problemId: string }
+  | {
+      status: "ready";
+      problemId: string;
+      problem: PublicProblemResponse;
+    }
+  | {
+      status: "error";
+      problemId: string;
+      kind: Exclude<ArenaProblemStateKind, "loading" | "malformed">;
+    };
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 const DUEL_JUDGE_STATUSES: ReadonlyArray<ExecutionStatus> = [
@@ -98,6 +179,58 @@ export default function ArenaLayout() {
   const problemParam = searchParams.get("problem");
   const handleParam = searchParams.get("handle") ?? undefined;
   const duelParam = searchParams.get("duel");
+  const hasSoloProblemRequest = !duelParam && problemParam !== null;
+  const requestedProblemId = useMemo(
+    () =>
+      hasSoloProblemRequest && problemParam
+        ? normalizeProblemId(problemParam)
+        : null,
+    [hasSoloProblemRequest, problemParam]
+  );
+  const [soloProblemLoad, setSoloProblemLoad] =
+    useState<SoloProblemLoadState>({ status: "idle" });
+  const [problemRetry, setProblemRetry] = useState(0);
+
+  useEffect(() => {
+    if (!hasSoloProblemRequest || !requestedProblemId || duelParam) {
+      return;
+    }
+
+    let cancelled = false;
+    setSoloProblemLoad({ status: "loading", problemId: requestedProblemId });
+    void getPublicProblem(requestedProblemId)
+      .then((loadedProblem) => {
+        if (!cancelled) {
+          setSoloProblemLoad({
+            status: "ready",
+            problemId: requestedProblemId,
+            problem: loadedProblem,
+          });
+        }
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        let kind: Exclude<
+          ArenaProblemStateKind,
+          "loading" | "malformed"
+        > = "network";
+        if (error instanceof V1ApiError) {
+          if (error.status === 404) kind = "not_found";
+          else if (error.errorCode === "INVALID_RESPONSE") {
+            kind = "invalid_response";
+          }
+        }
+        setSoloProblemLoad({
+          status: "error",
+          problemId: requestedProblemId,
+          kind,
+        });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [duelParam, hasSoloProblemRequest, problemRetry, requestedProblemId]);
 
   // Duel mode (Phase G4.1): poll shared state every 2s; never breaks normal Arena.
   const duelAuth = useAuth();
@@ -116,7 +249,7 @@ export default function ArenaLayout() {
         ? {
             key: duelProblemData.problem_id,
             name: duelProblemData.name,
-            rating: duelProblemData.rating ?? 0,
+            rating: duelProblemData.rating,
             tags: duelProblemData.tags ?? [],
             time_limit: "Practice judge",
             memory_limit: "Server limits",
@@ -128,17 +261,40 @@ export default function ArenaLayout() {
             notes: `${duelProblemData.content_notice ?? ""} ${duelState?.judging_note ?? ""}`.trim(),
             is_sample: false,
             official_url: duelProblemData.url,
+            content_available: duelProblemData.content_complete ?? false,
+            content_notice: duelProblemData.content_notice ?? undefined,
           }
         : null,
     [duelProblemData, duelState?.judging_note]
   );
 
-  const problem = duelProblem ?? SAMPLE_PROBLEM;
-  const effectiveKey = duelProblem?.key ?? problemParam ?? problem.key;
+  const soloProblem = useMemo(
+    () =>
+      requestedProblemId &&
+      soloProblemLoad.status === "ready" &&
+      soloProblemLoad.problemId === requestedProblemId
+        ? publicProblemToArena(soloProblemLoad.problem)
+        : null,
+    [requestedProblemId, soloProblemLoad]
+  );
+  const problem: ArenaProblem | null =
+    duelProblem ??
+    (duelParam
+      ? SAMPLE_PROBLEM
+      : hasSoloProblemRequest
+        ? soloProblem
+        : SAMPLE_PROBLEM);
+  const effectiveKey =
+    duelProblem?.key ??
+    (duelParam
+      ? `duel:${duelParam}`
+      : requestedProblemId ?? SAMPLE_PROBLEM.key);
 
   const [language, setLanguage] = useState<ExecutionLanguage>("cpp17");
   const [code, setCode] = useState<string>(() => JUDGE0_LANGUAGE_MAP.cpp17.starter_template);
-  const [testCases, setTestCases] = useState<TestCase[]>(() => makeSampleTests(problem));
+  const [testCases, setTestCases] = useState<TestCase[]>(() =>
+    makeSampleTests(SAMPLE_PROBLEM)
+  );
   const [result, setResult] = useState<ExecutionResult | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -155,13 +311,17 @@ export default function ArenaLayout() {
   const [hintLoading, setHintLoading] = useState(false);
   const [hintError, setHintError] = useState<string | null>(null);
   const [resultDismissed, setResultDismissed] = useState(false);
-  const duelKeyRef = useRef<string | null>(null);
+  const testProblemKeyRef = useRef<string | null>(null);
 
   const codeRef = useRef(code);
   const prevCodeRef = useRef(code);
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
   const sessionId = useRef(makeId());
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const codeStorageKey =
+    !duelParam && requestedProblemId
+      ? soloArenaDraftKey(requestedProblemId, language)
+      : legacyCodeKey(effectiveKey, language);
 
   function addEvent(type: ArenaEventType, data?: Record<string, unknown>) {
     setEvents((prev) => [
@@ -189,13 +349,13 @@ export default function ArenaLayout() {
 
   // Load code from localStorage when problem/language changes
   useEffect(() => {
-    const saved = localStorage.getItem(codeKey(effectiveKey, language));
+    const saved = localStorage.getItem(codeStorageKey);
     const template = JUDGE0_LANGUAGE_MAP[language].starter_template;
     const initial = saved ?? template;
     setCode(initial);
     codeRef.current = initial;
     prevCodeRef.current = initial;
-  }, [effectiveKey, language]);
+  }, [codeStorageKey, language]);
 
   // Load snapshots
   useEffect(() => {
@@ -211,10 +371,10 @@ export default function ArenaLayout() {
   useEffect(() => {
     codeRef.current = code;
     const t = setTimeout(() => {
-      localStorage.setItem(codeKey(effectiveKey, language), code);
+      localStorage.setItem(codeStorageKey, code);
     }, 1500);
     return () => clearTimeout(t);
-  }, [code, effectiveKey, language]);
+  }, [code, codeStorageKey]);
 
   // Auto-snapshot every 60s if code changed
   useEffect(() => {
@@ -246,21 +406,15 @@ export default function ArenaLayout() {
     if (duelParam && rightTab === "copilot") setRightTab("tests");
   }, [duelParam, rightTab]);
 
-  // Public samples remain available for local Run. Ranked Submit never uses
+  // Public samples remain available for local Run. Duel Submit never uses
   // these editable fields; the backend uses its hidden locked test snapshot.
-  useEffect(() => {
-    if (!duelProblem || duelKeyRef.current === duelProblem.key) return;
-    duelKeyRef.current = duelProblem.key;
-    const samples = makeSampleTests(duelProblem);
-    setTestCases(samples.length > 0 ? samples : [{
-        id: makeId(),
-        input: "",
-        expected_output: "",
-        status: "not_run",
-        is_sample: false,
-        label: "Local test 1",
-      }]);
-  }, [duelProblem]);
+  useLayoutEffect(() => {
+    if (!problem || testProblemKeyRef.current === problem.key) return;
+    testProblemKeyRef.current = problem.key;
+    setTestCases(localTestsForProblem(problem));
+    setResult(null);
+    setRightTab("tests");
+  }, [problem]);
 
   function handleLanguageChange(lang: ExecutionLanguage) {
     setLanguage(lang);
@@ -299,11 +453,16 @@ export default function ArenaLayout() {
       addEvent("result_received", { status: res.status, is_mock: res.is_mock });
 
       const actualOut = res.stdout ?? res.message ?? "";
+      const hasExpectedOutput = tc.expected_output.trim().length > 0;
       const finalStatus = res.is_mock
         ? ("not_run" as const)
-        : !res.is_mock && res.status === "accepted" && actualOut.trim() === tc.expected_output.trim()
+        : res.status === "accepted" &&
+            (!hasExpectedOutput ||
+              actualOut.trim() === tc.expected_output.trim())
           ? ("accepted" as const)
-          : res.status;
+          : res.status === "accepted"
+            ? ("wrong_answer" as const)
+            : res.status;
 
       setTestCases((prev) =>
         prev.map((t) =>
@@ -393,26 +552,7 @@ export default function ArenaLayout() {
   }
 
   async function handleSubmit() {
-    if (duelParam && duelSignedIn) {
-      await handleDuelSubmit();
-      return;
-    }
-    setIsSubmitting(true);
-    setResult(null);
-    addEvent("submit_clicked");
-    persistSnapshot("submit");
-    setRightTab("console");
-
-    const res = await submitCode({
-      language,
-      source_code: codeRef.current,
-      stdin: testCases[0]?.input ?? "",
-      problem_key: effectiveKey,
-    });
-
-    setResult(res);
-    addEvent("result_received", { status: res.status, is_mock: res.is_mock });
-    setIsSubmitting(false);
+    if (duelParam && duelSignedIn) await handleDuelSubmit();
   }
 
   async function handleUseHint() {
@@ -461,6 +601,57 @@ export default function ArenaLayout() {
 
   const busy = isRunning || isSubmitting;
   const duelJudgingUnavailable = Boolean(duelParam && duelState?.judging_available === false);
+  const officialUrl =
+    problem?.official_url ??
+    (problem?.is_sample
+      ? "https://codeforces.com/problemset"
+      : problem
+        ? codeforcesProblemHref(problem.key)
+        : null);
+
+  if (hasSoloProblemRequest && !requestedProblemId) {
+    return (
+      <ArenaProblemState
+        kind="malformed"
+        handle={handleParam}
+      />
+    );
+  }
+
+  if (hasSoloProblemRequest && requestedProblemId && !soloProblem) {
+    const currentState =
+      soloProblemLoad.status !== "idle" &&
+      soloProblemLoad.problemId === requestedProblemId
+        ? soloProblemLoad
+        : null;
+    return (
+      <ArenaProblemState
+        kind={
+          currentState?.status === "error"
+            ? currentState.kind
+            : "loading"
+        }
+        problemId={requestedProblemId}
+        handle={handleParam}
+        onRetry={
+          currentState?.status === "error"
+            ? () => setProblemRetry((value) => value + 1)
+            : undefined
+        }
+      />
+    );
+  }
+
+  if (!problem) {
+    return (
+      <ArenaProblemState
+        kind="invalid_response"
+        problemId={requestedProblemId ?? undefined}
+        handle={handleParam}
+        onRetry={() => setProblemRetry((value) => value + 1)}
+      />
+    );
+  }
 
   return (
     <div
@@ -473,7 +664,7 @@ export default function ArenaLayout() {
       }}
     >
       <ArenaHeader
-        problemKey={duelProblem?.key ?? problemParam ?? problem.key}
+        problemKey={problem.key}
         problemName={problem.name}
         language={language}
         onLanguageChange={handleLanguageChange}
@@ -485,6 +676,8 @@ export default function ArenaLayout() {
         isSubmitting={isSubmitting}
         submitDisabled={duelJudgingUnavailable}
         submitDisabledReason={duelJudgingUnavailable ? "Judging unavailable: this duel has no shared server-controlled tests." : undefined}
+        duelMode={Boolean(duelParam)}
+        officialUrl={officialUrl}
         savedAt={savedAt}
         snapshotCount={snapshots.length}
       />
@@ -597,9 +790,15 @@ export default function ArenaLayout() {
                 }
                 isRunning={busy}
                 runningId={runningId}
+                localOnly={!duelParam}
               />
             ) : rightTab === "console" ? (
-              <OutputConsole result={result} isRunning={busy} events={events} />
+              <OutputConsole
+                result={result}
+                isRunning={busy}
+                events={events}
+                localOnly={!duelParam}
+              />
             ) : duelParam ? (
               <div style={{ padding: "18px", color: "#FFAA33", fontSize: "12px" }}>
                 Copilot is disabled during PvP to keep the duel fair.
@@ -645,6 +844,12 @@ export default function ArenaLayout() {
         .md-show-flex { display: flex !important; }
         @media (max-width: 640px) { .sm-show { display: none !important; } .md-show { display: none !important; } .md-show-flex { display: none !important; } }
         @media (max-width: 900px) { .md-show { display: none !important; } .md-show-flex { display: none !important; } }
+        @media (max-width: 720px) {
+          .arena-run-label, .arena-official-label, .arena-snapshots { display: none !important; }
+        }
+        @media (max-width: 500px) {
+          .arena-logo { display: none !important; }
+        }
       `}</style>
     </div>
   );
